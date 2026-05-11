@@ -1,14 +1,17 @@
 require("dotenv").config();
+
 const express = require("express");
+const fetch = require("node-fetch");
 const { ConfidentialClientApplication } = require("@azure/msal-node");
 
 const app = express();
+
 const REDIRECT_URI = "http://localhost:3000/callback";
 
 const cca = new ConfidentialClientApplication({
   auth: {
     clientId: process.env.CLIENT_ID,
-    authority: "https://login.microsoftonline.com/common",
+    authority: "https://login.microsoftonline.com/organizations",
     clientSecret: process.env.CLIENT_SECRET,
   },
 });
@@ -18,50 +21,116 @@ const sessions = {};
 // ─── Graph helpers ────────────────────────────────────────────────────────────
 
 async function graphGet(token, path) {
-  const res = await fetch("https://graph.microsoft.com/v1.0" + path, {
-    headers: { Authorization: "Bearer " + token },
-  });
-  if (!res.ok) throw new Error("Graph error " + res.status + " on " + path);
+
+  const res = await fetch(
+    "https://graph.microsoft.com/v1.0" + path,
+    {
+      headers: {
+        Authorization: "Bearer " + token,
+      },
+    }
+  );
+
+  if (!res.ok) {
+
+    const text = await res.text();
+
+    console.error("GRAPH ERROR:", text);
+
+    throw new Error(
+      "Graph error " +
+      res.status +
+      " on " +
+      path
+    );
+  }
+
   return res.json();
 }
 
 async function graphGetAll(token, path) {
+
   let results = [];
+
   let url = "https://graph.microsoft.com/v1.0" + path;
+
   while (url) {
-    const res = await fetch(url, { headers: { Authorization: "Bearer " + token } });
-    if (!res.ok) throw new Error("Graph error " + res.status);
+
+    console.log("Graph page:", url);
+
+    const res = await fetch(url, {
+      headers: {
+        Authorization: "Bearer " + token,
+      },
+    });
+
+    if (!res.ok) {
+
+      const text = await res.text();
+
+      console.error("GRAPH PAGED ERROR:", text);
+
+      throw new Error(
+        "Graph error " + res.status
+      );
+    }
+
     const data = await res.json();
+
     results = results.concat(data.value || []);
+
     url = data["@odata.nextLink"] || null;
   }
+
   return results;
 }
 
 // ─── Data collection ──────────────────────────────────────────────────────────
 
 async function collectApps(token) {
+  console.log("INICIO collectApps");
+
   const [apps, servicePrincipals, auditLogs] = await Promise.all([
-    graphGetAll(token, "/applications?$select=id,appId,displayName,createdDateTime,signInAudience,requiredResourceAccess,owners,web,spa,publicClient,notes,description"),
-    graphGetAll(token, "/servicePrincipals?$select=appId,displayName,appRoles,oauth2PermissionScopes"),
+    graphGetAll(
+      token,
+      "/applications?$select=id,appId,displayName,createdDateTime,signInAudience,requiredResourceAccess,web,spa,publicClient,notes,description"
+    ),
+
+    graphGetAll(
+      token,
+      "/servicePrincipals?$select=appId,displayName,appRoles,oauth2PermissionScopes"
+    ),
+
     fetchAuditLogs(token),
   ]);
 
-  // Build SP map for permission name resolution
+  console.log("Apps encontrados:", apps.length);
+
   const spMap = {};
+
   for (const sp of servicePrincipals) {
     spMap[sp.appId] = sp;
   }
 
-  // Build creator map from audit logs
   const creatorMap = {};
+
   for (const log of auditLogs) {
-    if (log.operationType === "Add" && log.category === "Application" && log.targetResources) {
+    if (
+      log.operationType === "Add" &&
+      log.category === "Application" &&
+      log.targetResources
+    ) {
       for (const target of log.targetResources) {
         if (target.type === "Application" && !creatorMap[target.id]) {
           creatorMap[target.id] = {
-            name: log.initiatedBy?.user?.displayName || log.initiatedBy?.app?.displayName || "Desconhecido",
-            email: log.initiatedBy?.user?.userPrincipalName || null,
+            name:
+              log.initiatedBy?.user?.displayName ||
+              log.initiatedBy?.app?.displayName ||
+              "Desconhecido",
+
+            email:
+              log.initiatedBy?.user?.userPrincipalName || null,
+
             date: log.activityDateTime,
           };
         }
@@ -69,40 +138,62 @@ async function collectApps(token) {
     }
   }
 
-  // Fetch owners for each app (parallel, capped)
-  const ownerPromises = apps.map((a) =>
-    graphGet(token, "/applications/" + a.id + "/owners?$select=displayName,userPrincipalName,id")
-      .then((r) => ({ appId: a.id, owners: r.value || [] }))
-      .catch(() => ({ appId: a.id, owners: [] }))
-  );
-  const ownersResults = await Promise.all(ownerPromises);
-  const ownerMap = {};
-  for (const o of ownersResults) ownerMap[o.appId] = o.owners;
+  console.log("Buscando owners...");
 
-  // Resolve permissions
+  const ownerMap = {};
+
+  for (const a of apps) {
+    try {
+      const response = await graphGet(
+        token,
+        "/applications/" +
+        a.id +
+        "/owners?$select=displayName,userPrincipalName,id"
+      );
+
+      ownerMap[a.id] = response.value || [];
+    } catch (err) {
+      console.error("Erro owners:", a.displayName, err.message);
+      ownerMap[a.id] = [];
+    }
+  }
+
+  console.log("Owners OK");
+
   const enriched = apps.map((app) => {
     const appRoles = [];
     const delegated = [];
 
     for (const resource of app.requiredResourceAccess || []) {
       const sp = spMap[resource.resourceAppId];
-      const resourceName = sp ? sp.displayName : resource.resourceAppId;
+      const resourceName = sp
+        ? sp.displayName
+        : resource.resourceAppId;
 
       for (const acc of resource.resourceAccess || []) {
         if (acc.type === "Role") {
-          const def = sp?.appRoles?.find((r) => r.id === acc.id);
+          const def = sp?.appRoles?.find(
+            (r) => r.id === acc.id
+          );
+
           appRoles.push({
             id: acc.id,
             name: def?.value || null,
             description: def?.displayName || null,
             resource: resourceName,
           });
-        } else if (acc.type === "Scope") {
-          const def = sp?.oauth2PermissionScopes?.find((s) => s.id === acc.id);
+        }
+
+        else if (acc.type === "Scope") {
+          const def = sp?.oauth2PermissionScopes?.find(
+            (s) => s.id === acc.id
+          );
+
           delegated.push({
             id: acc.id,
             name: def?.value || null,
-            description: def?.adminConsentDisplayName || null,
+            description:
+              def?.adminConsentDisplayName || null,
             resource: resourceName,
           });
         }
@@ -111,6 +202,7 @@ async function collectApps(token) {
 
     const creator = creatorMap[app.id] || null;
     const owners = ownerMap[app.id] || [];
+
     const riskScore = calcRisk(appRoles, delegated);
 
     return {
@@ -120,11 +212,22 @@ async function collectApps(token) {
       creator,
       owners,
       riskScore,
-      riskLevel: riskScore >= 70 ? "critical" : riskScore >= 40 ? "high" : riskScore >= 10 ? "medium" : "low",
+
+      riskLevel:
+        riskScore >= 70
+          ? "critical"
+          : riskScore >= 40
+            ? "high"
+            : riskScore >= 10
+              ? "medium"
+              : "low",
     };
   });
 
   enriched.sort((a, b) => b.riskScore - a.riskScore);
+
+  console.log("collectApps FINALIZADO");
+
   return enriched;
 }
 
@@ -237,26 +340,29 @@ app.get("/progress/:sessionId", (req, res) => {
 // ─── Data endpoints ───────────────────────────────────────────────────────────
 
 app.get("/apps/:sessionId", (req, res) => {
-  const session = sessions[req.params.sessionId];
-  if (!session?.apps) return res.status(404).json({ error: "Dados nao encontrados" });
-  res.json(session.apps);
-});
+  console.log("Buscando apps da sessão:", req.params.sessionId);
 
-app.get("/refresh/:sessionId", async (req, res) => {
   const session = sessions[req.params.sessionId];
-  if (!session) return res.status(404).json({ error: "Sessao nao encontrada" });
-  try {
-    session.apps = await collectApps(session.token);
-    res.json({ count: session.apps.length, updatedAt: new Date().toISOString() });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+
+  if (!session) {
+    return res.status(404).json({
+      error: "Sessão não encontrada",
+    });
   }
-});
 
-app.get("/dashboard/:sessionId", (req, res) => {
-  const session = sessions[req.params.sessionId];
-  if (!session) return res.status(404).send("Sessao nao encontrada.");
-  res.send(buildDashboard(req.params.sessionId, session.tenantId));
+  if (!session.apps) {
+    return res.status(404).json({
+      error: "Apps ainda não carregados",
+    });
+  }
+
+  if (!Array.isArray(session.apps)) {
+    return res.status(500).json({
+      error: "Formato inválido",
+    });
+  }
+
+  res.json(session.apps);
 });
 
 // ─── Pages ────────────────────────────────────────────────────────────────────
@@ -758,18 +864,96 @@ function refresh(){
 }
 
 // Initial load
-document.getElementById("fb-all").classList.add("active");
-fetch("/apps/"+SESSION)
-  .then(function(r){return r.json();})
-  .then(function(data){
-    allApps=data;
+fetch("/apps/" + SESSION)
+  .then(function (r) {
+
+    if (!r.ok) {
+      throw new Error("HTTP " + r.status);
+    }
+
+    return r.json();
+  })
+
+  .then(function (data) {
+
+    console.log("DATA:", data);
+
+    if (!Array.isArray(data)) {
+      throw new Error("Resposta inválida");
+    }
+
+    allApps = data;
+
     updateStats(data);
+
     render();
   })
-  .catch(function(err){
-    document.getElementById("appsList").innerHTML='<div class="empty"><div class="empty-icon">❌</div>Erro ao carregar: '+err.message+'</div>';
+
+   .catch(function (err) {
+
+    console.error(err);
+
+    document.getElementById("appsList").innerHTML =
+      '<div class="empty">' +
+      '<div class="empty-icon">❌</div>' +
+      "Erro ao carregar: " +
+      err.message +
+      "</div>";
   });
-</script></body></html>`;
+</script>
+</body>
+</html>`;
 }
 
-app.listen(3000, () => console.log("🔑 App Registrations Audit rodando em http://localhost:3000"));
+app.get("/dashboard/:sessionId", (req, res) => {
+
+  const session = sessions[req.params.sessionId];
+
+  if (!session) {
+    return res.status(404).send("Sessão não encontrada");
+  }
+
+  res.send(
+    buildDashboard(
+      req.params.sessionId,
+      session.tenantId
+    )
+  );
+});
+
+app.get("/refresh/:sessionId", async (req, res) => {
+
+  const session = sessions[req.params.sessionId];
+
+  if (!session) {
+    return res.status(404).json({
+      error: "Sessão não encontrada",
+    });
+  }
+
+  try {
+
+    const apps = await collectApps(session.token);
+
+    session.apps = apps;
+
+    res.json({
+      success: true,
+      count: apps.length,
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+});
+
+app.listen(3000, () => {
+  console.log(
+    "🔑 App Registrations Audit rodando em http://localhost:3000"
+  );
+});
