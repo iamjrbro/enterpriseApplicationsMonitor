@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@azure/msal-node": "^5.2.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1"
   }
