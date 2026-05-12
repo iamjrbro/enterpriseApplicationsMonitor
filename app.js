@@ -4,7 +4,7 @@ const { ConfidentialClientApplication } = require("@azure/msal-node");
 const axios = require("axios");
 
 const app = express();
-const REDIRECT_URI = "http://localhost:3001/callback";
+const REDIRECT_URI = "https://enterprise-applications-monitor.onrender.com/callback";
 
 const cca = new ConfidentialClientApplication({
   auth: {
@@ -742,7 +742,7 @@ function buildDashboard(session, sessionId) {
 
 '<div class="hdr">'+
   '<div class="hdr-brand">'+
-    '<div><h1>ENTERPRISES APPLICATIONS MONITOR</h1><div class="tid">'+session.tenantId+'</div></div>'+
+    '<div><h1>ENTERPRISE APPLICATIONS MONITOR</h1><div class="tid">'+session.tenantId+'</div></div>'+
   '</div>'+
   '<div class="hdr-right">'+
     '<div class="live"><div class="dot"></div>LIVE</div>'+
@@ -948,4 +948,8 @@ function buildDashboard(session, sessionId) {
 '</script></body></html>';
 }
 
-app.listen(3001, () => console.log("📦 App Monitor rodando em http://localhost:3001"));
+const PORT = process.env.PORT || 3001;
+
+app.listen(PORT, () => {
+  console.log(`📦 App Monitor rodando na porta ${PORT}`);
+});
