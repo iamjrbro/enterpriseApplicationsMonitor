@@ -469,7 +469,7 @@ function buildLoadingPage(sessionId, tenantId) {
 '.sub{font-size:12px;color:#3a5068;margin-top:4px;letter-spacing:2px;text-transform:uppercase}'+
 '.btn{display:inline-block;margin-top:24px;padding:12px 32px;background:linear-gradient(135deg,#0369a1,#0ea5e9);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;letter-spacing:1px;text-transform:uppercase}'+
 '</style></head><body>'+
-'<div class="card"><h1>// APP MONITOR</h1><div class="tid">'+tenantId+'</div>'+
+'<div class="card"><h1>APP MONITOR</h1><div class="tid">'+tenantId+'</div>'+
 '<div class="bar-wrap"><div class="bar" id="bar"></div></div>'+
 '<div class="steps" id="steps"></div>'+
 '<div class="reveal" id="reveal"><div class="big" id="bigNum">—</div><div class="sub">aplicacoes encontradas</div><a class="btn" id="btn" href="#">ABRIR MONITOR</a></div></div>'+
