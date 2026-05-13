@@ -633,7 +633,7 @@ function buildDashboard(session, sessionId) {
 
   return '<!DOCTYPE html><html lang="pt-BR"><head>'+
 '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
-'<title>APP MONITOR</title>'+
+'<title>App Monitor</title>'+
 '<style>'+
 '@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap");'+
 '*{box-sizing:border-box;margin:0;padding:0}'+
@@ -742,7 +742,7 @@ function buildDashboard(session, sessionId) {
 
 '<div class="hdr">'+
   '<div class="hdr-brand">'+
-    '<div><h1>ENTERPRISES APPLICATIONS MONITOR</h1><div class="tid">'+session.tenantId+'</div></div>'+
+    '<div><h1>// APP MONITOR</h1><div class="tid">'+session.tenantId+'</div></div>'+
   '</div>'+
   '<div class="hdr-right">'+
     '<div class="live"><div class="dot"></div>LIVE</div>'+
