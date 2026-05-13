@@ -1,19 +1,16 @@
-{
-  "name": "appregistrationpermission",
-  "version": "1.0.0",
-  "description": "",
-  "main": "app.js",
-  "type": "commonjs",
-  "scripts": {
-    "start": "node app.js"
-  },
-  "dependencies": {
+  {"dependencies": {
     "@azure/msal-node": "^5.2.1",
     "axios": "^1.16.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "express-session": "^1.19.0",
     "node-fetch": "^2.7.0"
+  },
+  "name": "appregistrationpermission",
+  "version": "1.0.0",
+  "description": "",
+  "main": "analyzer.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
@@ -22,6 +19,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/iamjrbro/appRegistrationPermission/issues"
   },
