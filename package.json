@@ -1,31 +1,29 @@
 {
-  "name": "enterprise-applications-monitor",
-  "version": "2.0.0",
-  "description": "Monitor de Enterprise Applications e App Registrations no Microsoft Entra ID",
+  "name": "appregistrationpermission",
+  "version": "1.0.0",
+  "description": "",
   "main": "app.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node app.js",
-    "dev": "node --watch app.js"
-  },
-  "engines": {
-    "node": ">=18"
+    "start": "node app.js"
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
     "axios": "^1.16.0",
     "dotenv": "^17.4.2",
-    "express": "^4.21.2"
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "node-fetch": "^2.7.0"
   },
-  "keywords": [
-    "microsoft-graph",
-    "entra-id",
-    "azure-ad",
-    "enterprise-applications",
-    "app-registrations",
-    "security",
-    "oauth"
-  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamjrbro/appRegistrationPermission.git"
+  },
+  "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/iamjrbro/appRegistrationPermission/issues"
+  },
+  "homepage": "https://github.com/iamjrbro/appRegistrationPermission#readme"
 }
