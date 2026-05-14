@@ -517,29 +517,140 @@ function buildDashboard(session, sessionId) {
   var appsWithSecrets  = apps.filter(function(a){ return a.secrets&&a.secrets.length>0; });
   var expSecrets       = apps.filter(function(a){ return (a.secrets||[]).some(function(s){ return s.status==="expirada"||s.status==="expirando"; }); });
 
-  function buildAppRow(a) {
+  // ── Tooltip de risco por permissão ──────────────────────────────────────────
+  var RISK_TOOLTIPS = {
+    // Criticos
+    "Mail.ReadWrite":                   "CRITICO — Le e modifica todos os e-mails da organizacao. Um atacante pode ler, apagar ou alterar qualquer mensagem.",
+    "Mail.Send":                         "CRITICO — Envia e-mails como qualquer usuario da org. Pode ser usado para phishing interno.",
+    "Files.ReadWrite.All":               "CRITICO — Le e escreve em todos os arquivos do SharePoint/OneDrive de todos os usuarios.",
+    "Directory.ReadWrite.All":           "CRITICO — Le e modifica todo o diretorio Azure AD: usuarios, grupos, roles. Acesso quase total ao tenant.",
+    "User.ReadWrite.All":                "CRITICO — Cria, edita e deleta qualquer usuario do tenant. Pode ser usado para escalar privilegios.",
+    "RoleManagement.ReadWrite.Directory":"CRITICO — Atribui e remove roles de administrador. Pode elevar qualquer conta para Global Admin.",
+    "Application.ReadWrite.All":         "CRITICO — Cria e modifica qualquer aplicacao no tenant, incluindo secrets e permissoes.",
+    "Group.ReadWrite.All":               "CRITICO — Cria e modifica todos os grupos, incluindo grupos de seguranca e Teams.",
+    "full_access_as_app":                "CRITICO — Acesso total ao Exchange Online como a propria aplicacao, sem restricoes.",
+    // Altos
+    "Mail.Read":                         "ALTO — Le todos os e-mails de todos os usuarios. Expoe comunicacoes confidenciais da organizacao.",
+    "Files.Read.All":                    "ALTO — Le todos os arquivos de todos os usuarios no SharePoint e OneDrive.",
+    "User.Read.All":                     "ALTO — Le dados de todos os usuarios: nomes, e-mails, cargos, numeros de telefone.",
+    "Directory.Read.All":                "ALTO — Le todo o diretorio AD: usuarios, grupos, roles, dispositivos, configuracoes.",
+    "AuditLog.Read.All":                 "ALTO — Acessa os logs de auditoria do tenant. Pode revelar comportamentos e falhas de seguranca.",
+    "Policy.Read.All":                   "ALTO — Le todas as politicas de seguranca, acesso condicional e autenticacao.",
+    "IdentityRiskyUser.Read.All":        "ALTO — Le dados de usuarios sinalizados como de risco pelo Azure AD Identity Protection.",
+    // Normais comuns
+    "User.Read":                         "NORMAL — Le apenas o perfil do usuario que autorizou o acesso. Escopo limitado e seguro.",
+    "openid":                            "NORMAL — Permite login com conta Microsoft. Nao acessa dados alem da identidade basica.",
+    "profile":                           "NORMAL — Le nome, foto e informacoes basicas de perfil do usuario logado.",
+    "email":                             "NORMAL — Le o endereco de e-mail do usuario logado. Nao acessa a caixa de entrada.",
+    "offline_access":                    "NORMAL — Permite que o app funcione em segundo plano sem o usuario presente (refresh token).",
+    "Calendars.Read":                    "NORMAL — Le os eventos de calendario do usuario logado.",
+    "Calendars.ReadWrite":               "NORMAL/MEDIO — Le e cria eventos no calendario do usuario logado.",
+    "Tasks.ReadWrite":                   "NORMAL — Le e cria tarefas no Planner/To Do do usuario logado.",
+  };
+
+  function getPermTooltip(name, description, risk) {
+    if (!name) return description || "Permissao nao identificada";
+    // Busca correspondencia exata ou parcial no mapa de tooltips
+    for (var key in RISK_TOOLTIPS) {
+      if (name === key || name.startsWith(key)) return RISK_TOOLTIPS[key];
+    }
+    // Fallback: usa a descricao do Graph + nivel de risco
+    var riskLabel = risk==="critico" ? "🔴 CRITICO" : risk==="alto" ? "🟡 ALTO" : "🟢 NORMAL";
+    return riskLabel + " — " + (description || name);
+  }
+
+  // ── Sugestoes de permissoes por padrao de nome do app ────────────────────────
+  function getSuggestions(a) {
+    var name = (a.displayName||"").toLowerCase();
+    var currentNames = (a.appRoles||[]).concat(a.delegated||[]).map(function(p){ return p.name||""; });
+    var suggestions = { add:[], remove:[] };
+
+    // Permissoes que provavelmente NAO deveriam existir para apps comuns
+    var dangerousForMost = ["Directory.ReadWrite.All","User.ReadWrite.All","RoleManagement.ReadWrite.Directory","Application.ReadWrite.All","full_access_as_app"];
+    dangerousForMost.forEach(function(perm){
+      if (currentNames.some(function(n){return n===perm;})) {
+        suggestions.remove.push({ name:perm, reason:"Permissao de escrita critica raramente necessaria. Considere substituir por versao Read-only." });
+      }
+    });
+
+    // Sugestoes baseadas no nome do app
+    if (name.includes("mail") || name.includes("email") || name.includes("outlook")) {
+      if (!currentNames.some(function(n){return n==="Mail.Read";})) suggestions.add.push({ name:"Mail.Read", reason:"Apps de e-mail geralmente precisam ler mensagens." });
+      if (currentNames.some(function(n){return n==="Mail.ReadWrite";})) suggestions.remove.push({ name:"Mail.ReadWrite", reason:"Se o app so le e-mails, use Mail.Read em vez de ReadWrite." });
+    }
+    if (name.includes("user") || name.includes("people") || name.includes("directory")) {
+      if (!currentNames.some(function(n){return n==="User.Read.All";})) suggestions.add.push({ name:"User.Read.All", reason:"Apps de diretorio de usuarios precisam desta permissao de leitura." });
+    }
+    if (name.includes("report") || name.includes("audit") || name.includes("monitor") || name.includes("security") || name.includes("scan")) {
+      if (!currentNames.some(function(n){return n==="AuditLog.Read.All";})) suggestions.add.push({ name:"AuditLog.Read.All", reason:"Apps de monitoramento precisam ler logs de auditoria." });
+      if (!currentNames.some(function(n){return n==="Directory.Read.All";})) suggestions.add.push({ name:"Directory.Read.All", reason:"Apps de seguranca precisam ler o diretorio do tenant." });
+    }
+    if (name.includes("calendar") || name.includes("agenda") || name.includes("meeting")) {
+      if (!currentNames.some(function(n){return n==="Calendars.Read";})) suggestions.add.push({ name:"Calendars.Read", reason:"Apps de calendario precisam desta permissao." });
+    }
+    if (name.includes("file") || name.includes("sharepoint") || name.includes("document") || name.includes("doc")) {
+      if (!currentNames.some(function(n){return n==="Files.Read.All";})) suggestions.add.push({ name:"Files.Read.All", reason:"Apps de documentos precisam ler arquivos do SharePoint/OneDrive." });
+      if (currentNames.some(function(n){return n==="Files.ReadWrite.All";})) suggestions.remove.push({ name:"Files.ReadWrite.All", reason:"Se o app so le arquivos, use Files.Read.All em vez de ReadWrite.All." });
+    }
+    // App sem nenhuma permissao
+    if (currentNames.filter(function(n){return n;}).length===0) {
+      suggestions.add.push({ name:"User.Read", reason:"A maioria dos apps precisa ao menos desta permissao para identificar o usuario logado." });
+    }
+    return suggestions;
+  }
+
+  // ── buildAppRow com prefixo de aba para IDs unicos ───────────────────────────
+  function buildAppRow(a, tabPrefix) {
+    tabPrefix = tabPrefix || "all";
+    var uid = tabPrefix + "-" + a.appId; // ID unico por aba para evitar conflito de IDs
     var allPerms = (a.appRoles||[]).concat(a.delegated||[]);
     var isRisky = a.appRoles && a.appRoles.length>0;
     var owners = (a._owners||[]).map(function(o){ return o.displayName||o.userPrincipalName||o.mail||"?"; });
     var ownersStr = owners.length>0 ? owners.join(", ") : '<span style="color:#ef4444">Sem owner</span>';
-    var createdBy = a._createdBy ? a._createdBy : '<span style="color:#64748b">—</span>';
+    var createdBy = a._createdBy ? a._createdBy : '<span style="color:#2a4060">—</span>';
 
+    // Notas internas
+    var notesHtml = a.notes
+      ? '<div class="notes-box"><span class="notes-label">📝 Notas internas:</span> '+a.notes+'</div>'
+      : '';
+
+    // Permissoes com tooltip de risco individual
     var permsHtml = allPerms.length===0
-      ? '<span style="color:#3a5068;font-size:11px">Nenhuma permissao</span>'
+      ? '<span style="color:#3a5068;font-size:11px">Nenhuma permissao registrada</span>'
       : allPerms.map(function(p){
-          var risk=classifyPerm(p.name);
-          var isApp=!!(a.appRoles||[]).find(function(r){return r.id===p.id;});
-          var label=permLabel(p);
-          var desc=p.description?p.description:label;
-          return '<span class="pb" style="border-color:'+riskColor[risk]+';color:'+riskColor[risk]+'" title="'+desc+'">'+
-            '<span class="pt">'+(isApp?"APP":"DEL")+'</span> '+label+'</span>';
+          var risk = classifyPerm(p.name);
+          var isApp = !!(a.appRoles||[]).find(function(r){return r.id===p.id;});
+          var label = permLabel(p);
+          var tooltip = getPermTooltip(p.name, p.description, risk);
+          // Escapa aspas para nao quebrar o HTML do title
+          tooltip = tooltip.replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+          return '<div class="pb-wrap">'+
+            '<span class="pb" style="border-color:'+riskColor[risk]+';color:'+riskColor[risk]+'" data-tooltip="'+tooltip+'">'+
+              '<span class="pt">'+(isApp?"APP":"DEL")+'</span> '+label+
+            '</span>'+
+            '<div class="pb-tooltip">'+tooltip+'</div>'+
+          '</div>';
         }).join("");
 
+    // Sugestoes
+    var sugg = getSuggestions(a);
+    var suggHtml = "";
+    if (sugg.add.length===0 && sugg.remove.length===0) {
+      suggHtml = '<div class="sugg-ok">✅ Nenhuma sugestao — permissoes parecem adequadas para este app.</div>';
+    } else {
+      if (sugg.remove.length>0) {
+        suggHtml += '<div class="sugg-section"><div class="sugg-title" style="color:#ef4444">🔴 Considere REMOVER:</div>'+
+          sugg.remove.map(function(s){ return '<div class="sugg-item sugg-remove"><code>'+s.name+'</code><span>'+s.reason+'</span></div>'; }).join("")+'</div>';
+      }
+      if (sugg.add.length>0) {
+        suggHtml += '<div class="sugg-section"><div class="sugg-title" style="color:#4ade80">🟢 Considere ADICIONAR:</div>'+
+          sugg.add.map(function(s){ return '<div class="sugg-item sugg-add"><code>'+s.name+'</code><span>'+s.reason+'</span></div>'; }).join("")+'</div>';
+      }
+    }
+
     // Secrets
-    var secretsHtml = "";
-    if (a.secrets && a.secrets.length>0) {
-      secretsHtml = '<div class="secrets-wrap">'+
-        a.secrets.map(function(s){
+    var secretsHtml = (a.secrets&&a.secrets.length>0)
+      ? '<div class="secrets-wrap">'+a.secrets.map(function(s){
           var sc = s.status==="expirada"?"#ef4444":s.status==="expirando"?"#f59e0b":s.status==="sem-expiracao"?"#94a3b8":"#4ade80";
           var slabel = s.status==="expirada"?"EXPIRADA":s.status==="expirando"?"EXPIRA EM "+s.daysToExp+"d":s.status==="sem-expiracao"?"SEM EXPIRACAO":"ATIVA";
           return '<div class="secret-item">'+
@@ -547,45 +658,53 @@ function buildDashboard(session, sessionId) {
             '<span class="secret-dates">Criada: '+fmtDateOnly(s.startDate)+' → Expira: '+fmtDateOnly(s.endDate)+'</span>'+
             '<span class="secret-status" style="color:'+sc+'">'+slabel+'</span>'+
           '</div>';
-        }).join("")+
-      '</div>';
-    }
+        }).join("")+'</div>'
+      : '<span style="color:#3a5068;font-size:12px">Nenhuma secret registrada</span>';
 
-    // Audit log recente
-    var recentLogs = (a._auditLogs||[]).slice(0,3);
+    // Atividade recente
+    var recentLogs = (a._auditLogs||[]).slice(0,5);
     var auditHtml = recentLogs.length>0
       ? '<div class="audit-wrap"><div class="audit-title">Atividade recente:</div>'+
         recentLogs.map(function(l){
-          return '<div class="audit-item"><span class="audit-action">'+l.action+'</span><span class="audit-actor">por '+l.actor+'</span><span class="audit-time">'+fmtDate(l.timestamp)+'</span></div>';
+          return '<div class="audit-item">'+
+            '<span class="audit-action">'+l.action+'</span>'+
+            '<span class="audit-actor">por '+l.actor+'</span>'+
+            '<span class="audit-time">'+fmtDate(l.timestamp)+'</span>'+
+          '</div>';
         }).join("")+'</div>'
-      : '';
+      : '<span style="color:#3a5068;font-size:12px">Nenhuma atividade registrada nos ultimos 30 dias</span>';
 
-    return '<tr class="ar'+(isRisky?" risky":"")+'" data-name="'+(a.displayName||"").toLowerCase()+'" onclick="toggle(\'r-'+a.appId+'\')">' +
-      '<td><div class="app-name">'+(a.displayName||"—")+(isRisky?'<span class="risk-badge">App Perm</span>':'')+
+    return '<tr class="ar'+(isRisky?" risky":"")+'" onclick="toggle(\'rx-'+uid+'\')">' +
+      '<td><div class="app-name">'+(a.displayName||"—")+
+        (isRisky?'<span class="risk-badge">App Perm</span>':'')+
         ((a.secrets&&a.secrets.length>0)?'<span class="secret-badge">'+a.secrets.length+' secret(s)</span>':'')+
+        (a.notes?'<span class="notes-badge">📝 notas</span>':'')+
       '</div></td>'+
       '<td>'+fmtDate(a.createdDateTime)+'</td>'+
       '<td>'+createdBy+'</td>'+
       '<td>'+ownersStr+'</td>'+
       '<td style="text-align:center"><span style="color:#f59e0b">'+(a.appRoles||[]).length+'</span> APP / <span style="color:#60a5fa">'+(a.delegated||[]).length+'</span> DEL</td>'+
     '</tr>'+
-    '<tr id="r-'+a.appId+'" style="display:none"><td colspan="5" class="expand-cell">'+
+    '<tr id="rx-'+uid+'" style="display:none"><td colspan="5" class="expand-cell">'+
+      notesHtml+
       '<div class="expand-tabs">'+
-        '<div class="etab active" onclick="etab(this,\'ep-'+a.appId+'\')">Permissoes</div>'+
-        (a.secrets&&a.secrets.length>0?'<div class="etab" onclick="etab(this,\'es-'+a.appId+'\')">Secrets</div>':'')+
-        (recentLogs.length>0?'<div class="etab" onclick="etab(this,\'ea-'+a.appId+'\')">Atividade</div>':'')+
+        '<div class="etab active" onclick="etab(this,\'epp-'+uid+'\')">🔑 Permissoes</div>'+
+        '<div class="etab" onclick="etab(this,\'esg-'+uid+'\')">💡 Sugestoes'+(sugg.add.length+sugg.remove.length>0?' <span class="sugg-count">'+(sugg.add.length+sugg.remove.length)+'</span>':'')+'</div>'+
+        '<div class="etab" onclick="etab(this,\'esr-'+uid+'\')">🔐 Secrets</div>'+
+        '<div class="etab" onclick="etab(this,\'eat-'+uid+'\')">📋 Atividade</div>'+
       '</div>'+
-      '<div id="ep-'+a.appId+'" class="epanel active"><div class="perm-wrap">'+permsHtml+'</div></div>'+
-      '<div id="es-'+a.appId+'" class="epanel" style="display:none">'+secretsHtml+'</div>'+
-      '<div id="ea-'+a.appId+'" class="epanel" style="display:none">'+auditHtml+'</div>'+
+      '<div id="epp-'+uid+'" class="epanel active"><div class="perm-wrap">'+permsHtml+'</div></div>'+
+      '<div id="esg-'+uid+'" class="epanel" style="display:none"><div class="sugg-wrap">'+suggHtml+'</div></div>'+
+      '<div id="esr-'+uid+'" class="epanel" style="display:none">'+secretsHtml+'</div>'+
+      '<div id="eat-'+uid+'" class="epanel" style="display:none">'+auditHtml+'</div>'+
     '</td></tr>';
   }
 
-  // HTML de cada aba
-  function buildTabTable(list, emptyMsg) {
+  // HTML de cada aba — passa o prefixo para IDs unicos
+  function buildTabTable(list, emptyMsg, tabPrefix) {
     if (list.length===0) return '<div class="empty-tab">'+emptyMsg+'</div>';
     return '<table><thead><tr><th>Nome</th><th>Criado em</th><th>Criado por</th><th>Owner(s)</th><th>Permissoes</th></tr></thead><tbody>'+
-      list.map(buildAppRow).join("")+'</tbody></table>';
+      list.map(function(a){ return buildAppRow(a, tabPrefix||"all"); }).join("")+'</tbody></table>';
   }
 
   var changesHtml = changes24h.length===0
@@ -691,14 +810,30 @@ function buildDashboard(session, sessionId) {
 
 // Expand
 '.expand-cell{background:#060d16;padding:14px 16px;border-bottom:1px solid #1a2840}'+
+'.notes-box{background:#0a1f10;border:1px solid #166534;border-radius:7px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#86efac;line-height:1.6}'+
+'.notes-label{font-weight:700;margin-right:6px;font-family:"JetBrains Mono",monospace;font-size:10px;text-transform:uppercase;letter-spacing:1px}'+
+'.notes-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;background:#4ade8020;color:#4ade80;border:1px solid #4ade8040;font-family:"JetBrains Mono",monospace}'+
+'.sugg-wrap{display:flex;flex-direction:column;gap:10px}'+
+'.sugg-ok{font-size:12px;color:#4ade80;padding:8px;background:#061a10;border-radius:6px;font-family:"JetBrains Mono",monospace}'+
+'.sugg-section{display:flex;flex-direction:column;gap:4px}'+
+'.sugg-title{font-size:10px;font-weight:700;margin-bottom:6px;font-family:"JetBrains Mono",monospace;text-transform:uppercase;letter-spacing:1px}'+
+'.sugg-item{display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:6px;background:#060a0f;font-size:12px}'+
+'.sugg-item code{font-family:"JetBrains Mono",monospace;font-size:11px;flex-shrink:0;padding:1px 4px;border-radius:3px;background:#0a1525}'+
+'.sugg-remove code{color:#ef4444;border:1px solid #ef444430}'+
+'.sugg-add code{color:#4ade80;border:1px solid #4ade8030}'+
+'.sugg-item span{color:#94a3b8;line-height:1.5}'+
+'.sugg-count{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:#f59e0b;color:#000;border-radius:50%;font-size:9px;font-weight:700;margin-left:4px}'+
 '.expand-tabs{display:flex;gap:4px;margin-bottom:12px}'+
 '.etab{font-size:10px;padding:4px 10px;border-radius:5px;cursor:pointer;background:transparent;color:#3a5068;border:1px solid #1a2840;font-family:"JetBrains Mono",monospace;transition:all .2s}'+
 '.etab:hover{border-color:#38bdf8;color:#38bdf8}'+
 '.etab.active{background:#061828;border-color:#0ea5e9;color:#38bdf8}'+
 '.epanel{}.epanel.active{display:block}'+
 '.perm-wrap{display:flex;flex-wrap:wrap;gap:4px}'+
-'.pb{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;border:1px solid;cursor:help;font-family:"JetBrains Mono",monospace}'+
+'.pb{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;border:1px solid;font-family:"JetBrains Mono",monospace;position:relative}'+
 '.pt{font-size:8px;font-weight:700;opacity:.6}'+
+'.pb-wrap{position:relative;display:inline-block;margin:2px}'+
+'.pb-tooltip{display:none;position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#0a1a2a;border:1px solid #1e4060;border-radius:8px;padding:8px 12px;font-size:11px;color:#c8d8e8;white-space:pre-wrap;max-width:280px;min-width:180px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.7);line-height:1.5;pointer-events:none;text-align:left}'+
+'.pb-wrap:hover .pb-tooltip{display:block}'+
 '.leg{display:flex;gap:10px;font-size:10px;color:#2a4060;margin-bottom:10px;flex-wrap:wrap;font-family:"JetBrains Mono",monospace}'+
 
 // Secrets
@@ -782,22 +917,22 @@ function buildDashboard(session, sessionId) {
 
         '<div id="tp-all" class="tab-panel active">'+
           '<table><thead><tr><th>Nome</th><th>Criado em</th><th>Criado por</th><th>Owner(s)</th><th>Permissoes</th></tr></thead>'+
-          '<tbody id="body-all">'+allApps.map(buildAppRow).join("")+'</tbody></table>'+
+          '<tbody>'+allApps.map(function(a){return buildAppRow(a,"all");}).join("")+'</tbody></table>'+
         '</div>'+
         '<div id="tp-risky" class="tab-panel">'+
-          buildTabTable(riskyApps, "Nenhum app com Application Permission")+
+          buildTabTable(riskyApps, "Nenhum app com Application Permission","risky")+
         '</div>'+
         '<div id="tp-recent" class="tab-panel">'+
-          buildTabTable(recentApps, "Nenhum app criado nos ultimos 30 dias")+
+          buildTabTable(recentApps, "Nenhum app criado nos ultimos 30 dias","recent")+
         '</div>'+
         '<div id="tp-noowner" class="tab-panel">'+
-          buildTabTable(noOwnerApps, "Todos os apps possuem owner")+
+          buildTabTable(noOwnerApps, "Todos os apps possuem owner","noowner")+
         '</div>'+
         '<div id="tp-secrets" class="tab-panel">'+
-          buildTabTable(appsWithSecrets, "Nenhum app com secrets registradas")+
+          buildTabTable(appsWithSecrets, "Nenhum app com secrets registradas","secrets")+
         '</div>'+
         '<div id="tp-expsecrets" class="tab-panel">'+
-          buildTabTable(expSecrets, "Nenhuma secret expirada ou expirando")+
+          buildTabTable(expSecrets, "Nenhuma secret expirada ou expirando","expsecrets")+
         '</div>'+
       '</div>'+
     '</div>'+
