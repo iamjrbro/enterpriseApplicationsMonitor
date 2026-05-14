@@ -905,7 +905,7 @@ function buildDashboard(session, sessionId) {
 
 '<div class="hdr">'+
   '<div class="hdr-brand">'+
-    '<div><h1>// APP MONITOR</h1><div class="tid">'+session.tenantId+'</div></div>'+
+    '<div><h1>ENTERPRISE APPLICATIONS MONITOR</h1><div class="tid">'+session.tenantId+'</div></div>'+
   '</div>'+
   '<div class="hdr-right">'+
     '<div class="live"><div class="dot"></div>LIVE</div>'+
