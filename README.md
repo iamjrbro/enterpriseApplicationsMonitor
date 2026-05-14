@@ -1,3 +1,16 @@
+# Enterprise Applications Monitor
+
+Pensando no controle das API Permissions atribuídas à Enterprise Application no Entra ID, desenvolvi um dashboard que centraliza todas as Enterprise Applications do ambiente e exibe detalhadamente as permissões concedidas a cada uma delas.
+
+A solução utiliza Microsoft Graph API para coletar as informações dos aplicativos registrados no tenant, classificando automaticamente as permissões por nível de criticidade através de indicadores visuais por cores, facilitando a identificação rápida de permissões sensíveis ou excessivas.
+
+Na aba “Sugestões”, o dashboard realiza uma análise automatizada baseada em boas práticas de segurança e princípios de least privilege, indicando permissões que potencialmente poderiam ser removidas para reduzir superfície de ataque e riscos de exposição. A ferramenta atua apenas de forma analítica, ou seja, não executa alterações diretamente nos aplicativos, mantendo o processo de revisão e remoção sob validação da equipe responsável.
+
+Além das permissões, o painel também consolida informações relevantes de governança e auditoria, como data e horário de criação das aplicações, owners atribuídos e atividades registradas relacionadas aos aplicativos, permitindo maior rastreabilidade sobre alterações e movimentações realizadas no ambiente.
+
+O objetivo da ferramenta é apoiar iniciativas de governança, revisão periódica de privilégios, hardening de aplicações corporativas e fortalecimento da postura de segurança do tenant Microsoft Entra ID.
+
+
 # Como configurar?
 
 Antes de iniciar, certifique-se de possuir o Node.js instalado na máquina.
