@@ -51,9 +51,11 @@ Bibliotecas utilizadas no projeto:
 
 # Estrutura necessária do projeto
 
-Para o funcionamento correto da aplicação, é necessária a criação prévia de uma Enterprise Application no Microsoft Entra ID / Azure AD contendo uma Client Secret válida.
+Para o funcionamento correto da aplicação, é necessária a criação prévia de uma App Registration no Microsoft Entra ID contendo uma Client Secret válida, permissão Delegated da Microsoft Graph API - User.Read, Application.Read.All e AuditLog.Read.All — além da configuração do Redirect URI correspondente à URL onde o dashboard será executado.
 
-A aplicação utilizará essa identidade para autenticar no Microsoft Graph API e realizar a coleta das informações do tenant.
+Também é necessário definir o tipo de Supported Account de acordo com as políticas de segurança da organização. Por boas práticas, recomenda-se utilizar o modelo “Single Tenant Only”, restringindo a autenticação exclusivamente a usuários pertencentes ao tenant corporativo.
+
+A aplicação utilizará essa identidade para autenticar-se no Microsoft Graph API via OAuth 2.0 e realizar a coleta das informações do ambiente, incluindo Enterprise Applications, App Registrations, permissões atribuídas, owners, auditorias e demais dados relacionados à governança do tenant Microsoft Entra ID.
 
 ---
 
