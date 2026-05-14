@@ -70,28 +70,37 @@ async function getAuditLogs(token) {
   }
 }
 
-// Extrai o nome do ator de um log — cobre usuario comum, admin, PIM e app
+// Extrai o nome do ator de um log
 function resolveActor(log) {
   var ib = log.initiatedBy;
   if (!ib) return null;
 
-  // Caso 1: usuario humano (inclui admin com PIM — o UPN é o mesmo)
+  // PRIORIDADE ABSOLUTA: usuario humano (admin normal, admin via PIM, qualquer conta)
   if (ib.user) {
     var u = ib.user;
-    // Prioridade: displayName > userPrincipalName > id
-    var name = u.displayName || u.userPrincipalName || u.id || null;
-    // Se tiver UPN mas nao tiver displayName, usa o UPN (que ja identifica o user)
-    if (!name && u.ipAddress) name = "Usuario (IP: " + u.ipAddress + ")";
+    var name = u.displayName || u.userPrincipalName || null;
+    if (!name && u.id) name = "Usuario (" + u.id.substring(0,8) + "...)";
     return name || "Usuario desconhecido";
   }
 
-  // Caso 2: app / service principal (automacao, pipeline, etc)
+  // App/sistema: marca com prefixo para poder filtrar depois
   if (ib.app) {
-    var a = ib.app;
-    return (a.displayName || a.appId || "App desconhecido") + " [app]";
+    return "__SYSTEM__:" + (ib.app.displayName || ib.app.appId || "Sistema");
   }
 
-  return "Sistema";
+  return "__SYSTEM__:Azure AD";
+}
+
+// Verifica se ator e humano (nao e sistema)
+function isHumanActor(actor) {
+  return actor && !actor.startsWith("__SYSTEM__:");
+}
+
+// Formata ator para exibicao
+function formatActor(actor) {
+  if (!actor) return null;
+  if (actor.startsWith("__SYSTEM__:")) return null; // sistema = ignora
+  return actor;
 }
 
 // Service Principals para resolver nomes de permissoes
@@ -140,18 +149,15 @@ async function collectApps(token) {
         action: log.activityDisplayName,
         timestamp: log.activityDateTime,
         actor: actor,
+        isHuman: isHumanActor(actor),
         result: log.result,
         targetName: target.displayName,
-        // Guarda modificacoes de propriedades para detectar o que mudou
         modifiedProps: target.modifiedProperties || [],
       };
 
-      // Indexa pelo objectId do target (ex: id do application object)
       addToMap(target.id, entry);
-      // Indexa tambem pelo displayName como fallback
       if (target.displayName) addToMap(target.displayName, entry);
 
-      // Alguns logs tem o appId dentro de modifiedProperties
       if (target.modifiedProperties) {
         for (var prop of target.modifiedProperties) {
           if (prop.displayName === "AppId" && prop.newValue) {
@@ -192,22 +198,37 @@ async function collectApps(token) {
       appLogs.sort(function(a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
       chunk[j]._auditLogs = appLogs;
 
-      // Quem criou: procura "Add application" ou "Add service principal"
-      // Se nao achar, pega o log mais antigo de qualquer acao
+      // Quem criou: estrategia em camadas priorizando usuario humano
+      var createActions = ["add application", "add service principal"];
+
+      // Camada 1: log de criacao feito por HUMANO
       var createLog = appLogs.find(function(l) {
-        return l.action && (
-          l.action.toLowerCase().includes("add application") ||
-          l.action.toLowerCase().includes("add service principal") ||
-          l.action.toLowerCase() === "add application"
-        );
+        return l.isHuman && l.action && createActions.some(function(a){ return l.action.toLowerCase().includes(a); });
       });
 
-      // Fallback: log mais antigo disponivel
-      if (!createLog && appLogs.length > 0) {
-        createLog = appLogs.slice().sort(function(a,b){ return new Date(a.timestamp)-new Date(b.timestamp); })[0];
+      // Camada 2: qualquer log de criacao (mesmo sistema)
+      if (!createLog) {
+        createLog = appLogs.find(function(l) {
+          return l.action && createActions.some(function(a){ return l.action.toLowerCase().includes(a); });
+        });
       }
 
-      chunk[j]._createdBy = createLog ? createLog.actor : null;
+      // Camada 3: log humano mais antigo de qualquer acao
+      if (!createLog) {
+        var humanLogs = appLogs.filter(function(l){ return l.isHuman; });
+        if (humanLogs.length > 0) {
+          createLog = humanLogs.slice().sort(function(a,b){ return new Date(a.timestamp)-new Date(b.timestamp); })[0];
+        }
+      }
+
+      // Formata o ator — se for sistema, retorna null para exibir como desconhecido
+      if (createLog) {
+        chunk[j]._createdBy = createLog.isHuman ? createLog.actor : null;
+        chunk[j]._createdBySystem = !createLog.isHuman ? formatActor(createLog.actor) : null;
+      } else {
+        chunk[j]._createdBy = null;
+        chunk[j]._createdBySystem = null;
+      }
     }
     appsEnriched = appsEnriched.concat(chunk);
   }
@@ -607,11 +628,16 @@ function buildDashboard(session, sessionId) {
     var isRisky = a.appRoles && a.appRoles.length>0;
     var owners = (a._owners||[]).map(function(o){ return o.displayName||o.userPrincipalName||o.mail||"?"; });
     var ownersStr = owners.length>0 ? owners.join(", ") : '<span style="color:#ef4444">Sem owner</span>';
-    var createdBy = a._createdBy ? a._createdBy : '<span style="color:#2a4060">—</span>';
+    // Prioriza usuario humano; fallback para sistema ou mensagem de log antigo
+    var createdBy = a._createdBy
+      ? a._createdBy
+      : a._createdBySystem
+        ? '<span style="color:#3a5068;font-size:10px">via ' + a._createdBySystem + '</span>'
+        : '<span style="color:#2a4060;font-size:10px">Anterior a 30 dias</span>';
 
     // Notas internas
     var notesHtml = a.notes
-      ? '<div class="notes-box"><span class="notes-label">Notas internas:</span> '+a.notes+'</div>'
+      ? '<div class="notes-box"><span class="notes-label">📝 Notas internas:</span> '+a.notes+'</div>'
       : '';
 
     // Permissoes com tooltip de risco individual
@@ -666,9 +692,11 @@ function buildDashboard(session, sessionId) {
     var auditHtml = recentLogs.length>0
       ? '<div class="audit-wrap"><div class="audit-title">Atividade recente:</div>'+
         recentLogs.map(function(l){
+          var actorDisplay = l.isHuman ? l.actor : (formatActor(l.actor) || 'Sistema');
+          var actorColor = l.isHuman ? '#38bdf8' : '#3a5068';
           return '<div class="audit-item">'+
             '<span class="audit-action">'+l.action+'</span>'+
-            '<span class="audit-actor">por '+l.actor+'</span>'+
+            '<span class="audit-actor" style="color:'+actorColor+'">por '+actorDisplay+'</span>'+
             '<span class="audit-time">'+fmtDate(l.timestamp)+'</span>'+
           '</div>';
         }).join("")+'</div>'
@@ -688,10 +716,10 @@ function buildDashboard(session, sessionId) {
     '<tr id="rx-'+uid+'" style="display:none"><td colspan="5" class="expand-cell">'+
       notesHtml+
       '<div class="expand-tabs">'+
-        '<div class="etab active" onclick="etab(this,\'epp-'+uid+'\')">Permissões</div>'+
-        '<div class="etab" onclick="etab(this,\'esg-'+uid+'\')">Sugestões'+(sugg.add.length+sugg.remove.length>0?' <span class="sugg-count">'+(sugg.add.length+sugg.remove.length)+'</span>':'')+'</div>'+
-        '<div class="etab" onclick="etab(this,\'esr-'+uid+'\')">Secrets</div>'+
-        '<div class="etab" onclick="etab(this,\'eat-'+uid+'\')">Atividade</div>'+
+        '<div class="etab active" onclick="etab(this,\'epp-'+uid+'\')">🔑 Permissoes</div>'+
+        '<div class="etab" onclick="etab(this,\'esg-'+uid+'\')">💡 Sugestoes'+(sugg.add.length+sugg.remove.length>0?' <span class="sugg-count">'+(sugg.add.length+sugg.remove.length)+'</span>':'')+'</div>'+
+        '<div class="etab" onclick="etab(this,\'esr-'+uid+'\')">🔐 Secrets</div>'+
+        '<div class="etab" onclick="etab(this,\'eat-'+uid+'\')">📋 Atividade</div>'+
       '</div>'+
       '<div id="epp-'+uid+'" class="epanel active"><div class="perm-wrap">'+permsHtml+'</div></div>'+
       '<div id="esg-'+uid+'" class="epanel" style="display:none"><div class="sugg-wrap">'+suggHtml+'</div></div>'+
@@ -892,7 +920,7 @@ function buildDashboard(session, sessionId) {
   // Stats clicaveis
   '<div class="stats">'+
     '<div class="sc active-tab" id="tab-btn-all" onclick="switchMainTab(\'all\',this)"><div class="sn" id="stTotal">'+allApps.length+'</div><div class="sl">Todos</div></div>'+
-    '<div class="sc" id="tab-btn-risky" onclick="switchMainTab(\'risky\',this)"><div class="sn" id="stRisky" style="color:#f59e0b">'+riskyApps.length+'</div><div class="sl">API permissions</div></div>'+
+    '<div class="sc" id="tab-btn-risky" onclick="switchMainTab(\'risky\',this)"><div class="sn" id="stRisky" style="color:#f59e0b">'+riskyApps.length+'</div><div class="sl">App Perm</div></div>'+
     '<div class="sc" id="tab-btn-recent" onclick="switchMainTab(\'recent\',this)"><div class="sn" id="stRecent" style="color:#60a5fa">'+recentApps.length+'</div><div class="sl">Criados 30d</div></div>'+
     '<div class="sc" id="tab-btn-noowner" onclick="switchMainTab(\'noowner\',this)"><div class="sn" id="stNoOwner" style="color:#ef4444">'+noOwnerApps.length+'</div><div class="sl">Sem Owner</div></div>'+
     '<div class="sc" id="tab-btn-secrets" onclick="switchMainTab(\'secrets\',this)"><div class="sn" id="stSecrets" style="color:#a78bfa">'+appsWithSecrets.length+'</div><div class="sl">Com Secrets</div></div>'+
