@@ -23,7 +23,19 @@ npm init -y
 Instale todas as dependências necessárias:
 
 ```bash
-npm install express axios dotenv @azure/msal-node
+npm install express axios 
+```
+
+```bash
+npm install axios 
+```
+
+```bash
+npm install dotenv 
+```
+
+```bash
+npm install @azure/msal-node
 ```
 
 Bibliotecas utilizadas no projeto:
