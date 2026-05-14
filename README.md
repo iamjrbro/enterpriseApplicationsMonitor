@@ -94,14 +94,12 @@ Descrição das variáveis:
 |---|---|
 | CLIENT_ID | Application (Client) ID da Enterprise Application |
 | CLIENT_SECRET | Secret gerada no portal Azure |
-| TENANT_ID | ID do tenant Microsoft |
 
 Exemplo:
 
 ```env
 CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
-TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
 ---
