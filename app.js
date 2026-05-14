@@ -611,7 +611,7 @@ function buildDashboard(session, sessionId) {
 
     // Notas internas
     var notesHtml = a.notes
-      ? '<div class="notes-box"><span class="notes-label">📝 Notas internas:</span> '+a.notes+'</div>'
+      ? '<div class="notes-box"><span class="notes-label">Notas internas:</span> '+a.notes+'</div>'
       : '';
 
     // Permissoes com tooltip de risco individual
@@ -688,10 +688,10 @@ function buildDashboard(session, sessionId) {
     '<tr id="rx-'+uid+'" style="display:none"><td colspan="5" class="expand-cell">'+
       notesHtml+
       '<div class="expand-tabs">'+
-        '<div class="etab active" onclick="etab(this,\'epp-'+uid+'\')">🔑 Permissoes</div>'+
-        '<div class="etab" onclick="etab(this,\'esg-'+uid+'\')">💡 Sugestoes'+(sugg.add.length+sugg.remove.length>0?' <span class="sugg-count">'+(sugg.add.length+sugg.remove.length)+'</span>':'')+'</div>'+
-        '<div class="etab" onclick="etab(this,\'esr-'+uid+'\')">🔐 Secrets</div>'+
-        '<div class="etab" onclick="etab(this,\'eat-'+uid+'\')">📋 Atividade</div>'+
+        '<div class="etab active" onclick="etab(this,\'epp-'+uid+'\')">Permissões</div>'+
+        '<div class="etab" onclick="etab(this,\'esg-'+uid+'\')">Sugestões'+(sugg.add.length+sugg.remove.length>0?' <span class="sugg-count">'+(sugg.add.length+sugg.remove.length)+'</span>':'')+'</div>'+
+        '<div class="etab" onclick="etab(this,\'esr-'+uid+'\')">Secrets</div>'+
+        '<div class="etab" onclick="etab(this,\'eat-'+uid+'\')">Atividade</div>'+
       '</div>'+
       '<div id="epp-'+uid+'" class="epanel active"><div class="perm-wrap">'+permsHtml+'</div></div>'+
       '<div id="esg-'+uid+'" class="epanel" style="display:none"><div class="sugg-wrap">'+suggHtml+'</div></div>'+
@@ -892,7 +892,7 @@ function buildDashboard(session, sessionId) {
   // Stats clicaveis
   '<div class="stats">'+
     '<div class="sc active-tab" id="tab-btn-all" onclick="switchMainTab(\'all\',this)"><div class="sn" id="stTotal">'+allApps.length+'</div><div class="sl">Todos</div></div>'+
-    '<div class="sc" id="tab-btn-risky" onclick="switchMainTab(\'risky\',this)"><div class="sn" id="stRisky" style="color:#f59e0b">'+riskyApps.length+'</div><div class="sl">App Perm</div></div>'+
+    '<div class="sc" id="tab-btn-risky" onclick="switchMainTab(\'risky\',this)"><div class="sn" id="stRisky" style="color:#f59e0b">'+riskyApps.length+'</div><div class="sl">API permissions</div></div>'+
     '<div class="sc" id="tab-btn-recent" onclick="switchMainTab(\'recent\',this)"><div class="sn" id="stRecent" style="color:#60a5fa">'+recentApps.length+'</div><div class="sl">Criados 30d</div></div>'+
     '<div class="sc" id="tab-btn-noowner" onclick="switchMainTab(\'noowner\',this)"><div class="sn" id="stNoOwner" style="color:#ef4444">'+noOwnerApps.length+'</div><div class="sl">Sem Owner</div></div>'+
     '<div class="sc" id="tab-btn-secrets" onclick="switchMainTab(\'secrets\',this)"><div class="sn" id="stSecrets" style="color:#a78bfa">'+appsWithSecrets.length+'</div><div class="sl">Com Secrets</div></div>'+
