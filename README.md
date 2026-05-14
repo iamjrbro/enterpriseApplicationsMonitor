@@ -59,7 +59,6 @@ Nele deverão ser configuradas:
 ```env
 CLIENT_ID=
 CLIENT_SECRET=
-TENANT_ID=
 ```
 
 Descrição das variáveis:
