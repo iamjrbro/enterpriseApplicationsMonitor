@@ -1,3 +1,16 @@
+# Enterprise Applications Monitor
+
+Pensando no controle das API Permissions atribuídas à Enterprise Application no Entra ID, desenvolvi um dashboard que centraliza todas as Enterprise Applications do ambiente e exibe detalhadamente as permissões concedidas a cada uma delas.
+
+A solução utiliza Microsoft Graph API para coletar as informações dos aplicativos registrados no tenant, classificando automaticamente as permissões por nível de criticidade através de indicadores visuais por cores, facilitando a identificação rápida de permissões sensíveis ou excessivas.
+
+Na aba “Sugestões”, o dashboard realiza uma análise automatizada baseada em boas práticas de segurança e princípios de least privilege, indicando permissões que potencialmente poderiam ser removidas para reduzir superfície de ataque e riscos de exposição. A ferramenta atua apenas de forma analítica, ou seja, não executa alterações diretamente nos aplicativos, mantendo o processo de revisão e remoção sob validação da equipe responsável.
+
+Além das permissões, o painel também consolida informações relevantes de governança e auditoria, como data e horário de criação das aplicações, owners atribuídos e atividades registradas relacionadas aos aplicativos, permitindo maior rastreabilidade sobre alterações e movimentações realizadas no ambiente.
+
+O objetivo da ferramenta é apoiar iniciativas de governança, revisão periódica de privilégios, hardening de aplicações corporativas e fortalecimento da postura de segurança do tenant Microsoft Entra ID.
+
+
 # Como configurar?
 
 Antes de iniciar, certifique-se de possuir o Node.js instalado na máquina.
@@ -10,7 +23,19 @@ npm init -y
 Instale todas as dependências necessárias:
 
 ```bash
-npm install express axios dotenv @azure/msal-node
+npm install express axios 
+```
+
+```bash
+npm install axios 
+```
+
+```bash
+npm install dotenv 
+```
+
+```bash
+npm install @azure/msal-node
 ```
 
 Bibliotecas utilizadas no projeto:
@@ -26,9 +51,11 @@ Bibliotecas utilizadas no projeto:
 
 # Estrutura necessária do projeto
 
-Para o funcionamento correto da aplicação, é necessária a criação prévia de uma Enterprise Application no Microsoft Entra ID / Azure AD contendo uma Client Secret válida.
+Para o funcionamento correto da aplicação, é necessária a criação prévia de uma App Registration no Microsoft Entra ID contendo uma Client Secret válida, permissão Delegated da Microsoft Graph API - User.Read, Application.Read.All e AuditLog.Read.All — além da configuração do Redirect URI correspondente à URL onde o dashboard será executado.
 
-A aplicação utilizará essa identidade para autenticar no Microsoft Graph API e realizar a coleta das informações do tenant.
+Também é necessário definir o tipo de Supported Account de acordo com as políticas de segurança da organização. Por boas práticas, recomenda-se utilizar o modelo “Single Tenant Only”, restringindo a autenticação exclusivamente a usuários pertencentes ao tenant corporativo.
+
+A aplicação utilizará essa identidade para autenticar-se no Microsoft Graph API via OAuth 2.0 e realizar a coleta das informações do ambiente, incluindo Enterprise Applications, App Registrations, permissões atribuídas, owners, auditorias e demais dados relacionados à governança do tenant Microsoft Entra ID.
 
 ---
 
@@ -67,14 +94,12 @@ Descrição das variáveis:
 |---|---|
 | CLIENT_ID | Application (Client) ID da Enterprise Application |
 | CLIENT_SECRET | Secret gerada no portal Azure |
-| TENANT_ID | ID do tenant Microsoft |
 
 Exemplo:
 
 ```env
 CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
-TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
 ---
