@@ -3,8 +3,11 @@ const express = require("express");
 const { ConfidentialClientApplication } = require("@azure/msal-node");
 const axios = require("axios");
 
+
+// Altere a redirect URI para a do app onde seu dashboard será hospedado
+
 const app = express();
-const REDIRECT_URI = "https://enterprise-applications-monitor.onrender.com/callback";
+const REDIRECT_URI = "https://enterprise-applications-monitor.onrender.com";
 
 const cca = new ConfidentialClientApplication({
   auth: {
