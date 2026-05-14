@@ -4,9 +4,13 @@ const { ConfidentialClientApplication } = require("@azure/msal-node");
 const axios = require("axios");
 
 
-// Altere a redirect URI para a do app onde seu dashboard será hospedado
+// altere a redirect URI para a do app onde seu dashboard será hospedado
 
 const app = express();
+
+// para que fique somente interna da empresa/tenant no Microsoft Entra ID alete a linha abaixo para o tenantId específico da sua organização, por exemplo: "https://login.microsoftonline.com/seu-tenant-id"
+// "https://login.microsoftonline.com/SEU_TENANT_ID" ou "https://login.microsoftonline.com/seudominio.onmicrosoft.com"
+
 const REDIRECT_URI = "https://enterprise-applications-monitor.onrender.com";
 
 const cca = new ConfidentialClientApplication({
@@ -16,6 +20,38 @@ const cca = new ConfidentialClientApplication({
     clientSecret: process.env.CLIENT_SECRET,
   },
 });
+
+
+/* 
+
+> outra opção é validar manualmente o domínio do usuário no código
+
+ const user = tokenResponse.account;
+
+if (
+  !user.username.endsWith("@empresa.com")
+) {
+  return res
+    .status(403)
+    .send("Acesso não autorizado");
+}
+    
+> ou validar Object IDs específicos
+
+const allowedUsers = [
+  "GUID1",
+  "GUID2"
+];
+
+if (
+  !allowedUsers.includes(
+    tokenResponse.account.homeAccountId
+  )
+) {
+  return res.status(403).send("Sem acesso");
+}
+
+*/
 
 const sessions = {};
 
