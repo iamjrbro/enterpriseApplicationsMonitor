@@ -568,6 +568,10 @@ function buildDashboard(session, sessionId) {
   var allApps         = apps;
   var riskyApps       = apps.filter(function(a) { return a.appRoles && a.appRoles.length > 0; });
   var writeApps       = apps.filter(function(a) { return a._writePermissions && a._writePermissions.length > 0; });
+  var writeGroupsApps = apps.filter(function(a) { return getWriteCategories(a).includes("groups"); });
+  var writeUsersApps  = apps.filter(function(a) { return getWriteCategories(a).includes("users"); });
+  var writeEmailApps  = apps.filter(function(a) { return getWriteCategories(a).includes("email"); });
+  var writeFilesApps  = apps.filter(function(a) { return getWriteCategories(a).includes("files"); });
   var recentApps      = apps.filter(function(a) { return a.createdDateTime && (Date.now() - new Date(a.createdDateTime).getTime()) / 86400000 <= 30; });
   var noOwnerApps     = apps.filter(function(a) { return !a._owners || a._owners.length === 0; });
   var appsWithSecrets = apps.filter(function(a) { return a.secrets && a.secrets.length > 0; });
@@ -937,7 +941,7 @@ switchMainTab('writefiles', this)
 '.refresh-spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}' +
 '.upd{font-size:11px;color:#2a4060}' +
 '.wrap{max-width:1400px;margin:0 auto;padding:20px}' +
-'.stats{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:16px}' +
+'.stats{display:grid;grid-template-columns:repeat(12,1fr);gap:8px;margin-bottom:16px}'+
 '.sc{background:#0d1520;border:1px solid #1a2840;border-radius:10px;padding:12px 8px;text-align:center;cursor:pointer;transition:all .2s}' +
 '.sc:hover{border-color:#38bdf8;transform:translateY(-2px)}.sc.active-tab{border-color:#0ea5e9;background:#061828}' +
 '.sn{font-size:24px;font-weight:700;color:#c8d8e8;font-family:"JetBrains Mono",monospace}' +
@@ -1014,6 +1018,10 @@ switchMainTab('writefiles', this)
   '<div class="sc active-tab" id="tab-btn-all" onclick="switchMainTab(\'all\',this)"><div class="sn" id="stTotal">' + allApps.length + '</div><div class="sl">Todos</div></div>' +
   '<div class="sc" id="tab-btn-risky" onclick="switchMainTab(\'risky\',this)"><div class="sn" id="stRisky" style="color:#f59e0b">' + riskyApps.length + '</div><div class="sl">App Perm</div></div>' +
   '<div class="sc" id="tab-btn-write" onclick="switchMainTab(\'write\',this)"><div class="sn" id="stWrite" style="color:#ef4444">' + writeApps.length + '</div><div class="sl">Write</div></div>' +
+  '<div class="sc" id="tab-btn-writegroups" onclick="switchMainTab(\'writegroups\',this)"><div class="sn" id="stWriteGroups" style="color:#ef4444">' + writeGroupsApps.length + '</div><div class="sl">Write Groups</div></div>' +
+  '<div class="sc" id="tab-btn-writeusers" onclick="switchMainTab(\'writeusers\',this)"><div class="sn" id="stWriteUsers" style="color:#ef4444">' + writeUsersApps.length + '</div><div class="sl">Write Users</div></div>' +
+  '<div class="sc" id="tab-btn-writeemail" onclick="switchMainTab(\'writeemail\',this)"><div class="sn" id="stWriteEmail" style="color:#ef4444">' + writeEmailApps.length + '</div><div class="sl">Write E-mail</div></div>' +
+  '<div class="sc" id="tab-btn-writefiles" onclick="switchMainTab(\'writefiles\',this)"><div class="sn" id="stWriteFiles" style="color:#ef4444">' + writeFilesApps.length + '</div><div class="sl">Write Files</div></div>' +
   '<div class="sc" id="tab-btn-critical" onclick="switchMainTab(\'critical\',this)"><div class="sn" id="stCritical" style="color:#ef4444">' + criticalApps.length + '</div><div class="sl">Critical</div></div>' +
   '<div class="sc" id="tab-btn-recent" onclick="switchMainTab(\'recent\',this)"><div class="sn" id="stRecent" style="color:#60a5fa">' + recentApps.length + '</div><div class="sl">30 dias</div></div>' +
   '<div class="sc" id="tab-btn-noowner" onclick="switchMainTab(\'noowner\',this)"><div class="sn" id="stNoOwner" style="color:#ef4444">' + noOwnerApps.length + '</div><div class="sl">Sem Owner</div></div>' +
@@ -1029,6 +1037,10 @@ switchMainTab('writefiles', this)
 '<div id="tp-all" class="tab-panel active"><table><thead><tr><th>Nome</th><th>Criado em</th><th>Ultimo uso</th><th>Criado por</th><th>Owner(s)</th><th>Permissoes</th></tr></thead><tbody>' + allApps.map(function(a) { return buildAppRow(a, "all"); }).join("") + '</tbody></table></div>' +
 '<div id="tp-risky" class="tab-panel">' + buildTabTable(riskyApps, "Nenhum app com Application Permission", "risky") + '</div>' +
 '<div id="tp-write" class="tab-panel">' + buildTabTable(writeApps, "Nenhum app com permissoes de escrita", "write") + '</div>' +
+'<div id="tp-writegroups" class="tab-panel">' + buildTabTable(writeGroupsApps, "Nenhum app com Write em Groups", "writegroups") + '</div>' +
+'<div id="tp-writeusers" class="tab-panel">' + buildTabTable(writeUsersApps, "Nenhum app com Write em Users", "writeusers") + '</div>' +
+'<div id="tp-writeemail" class="tab-panel">' + buildTabTable(writeEmailApps, "Nenhum app com Write em E-mail", "writeemail") + '</div>' +
+'<div id="tp-writefiles" class="tab-panel">' + buildTabTable(writeFilesApps, "Nenhum app com Write em Files", "writefiles") + '</div>' +
 '<div id="tp-critical" class="tab-panel">' + buildTabTable(criticalApps, "Nenhum app com risco Critical", "critical") + '</div>' +
 '<div id="tp-recent" class="tab-panel">' + buildTabTable(recentApps, "Nenhum app criado nos ultimos 30 dias", "recent") + '</div>' +
 '<div id="tp-noowner" class="tab-panel">' + buildTabTable(noOwnerApps, "Todos os apps possuem owner", "noowner") + '</div>' +
