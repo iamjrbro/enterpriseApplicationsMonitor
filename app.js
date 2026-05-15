@@ -103,6 +103,127 @@ function formatActor(actor) {
   return actor;
 }
 
+// ─── Último uso do aplicativo (sign-ins) ─────────────────────────────────────
+async function getLastSignIn(appId, token) {
+  try {
+    const url =
+      "https://graph.microsoft.com/beta/auditLogs/signIns" +
+      "?$filter=appId eq '" + appId + "'" +
+      "&$orderby=createdDateTime desc" +
+      "&$top=1";
+
+    const res = await axios.get(url, {
+      headers: {
+        Authorization: "Bearer " + token,
+      },
+    });
+
+    return res.data.value && res.data.value.length > 0
+      ? res.data.value[0]
+      : null;
+
+  } catch (e) {
+    console.error("Erro last sign-in:", appId, e.message);
+    return null;
+  }
+}
+
+
+// ─── Detecta permissões perigosas/write ──────────────────────────────────────
+function analyzeWritePermissions(app) {
+  const allPerms = []
+    .concat(app.appRoles || [])
+    .concat(app.delegated || []);
+
+  const writePerms = allPerms.filter(function(p) {
+    const n = (p.name || "").toLowerCase();
+
+    return (
+      n.includes("write") ||
+      n.includes("readwrite") ||
+      n.includes(".all") ||
+      n.includes("full_access_as_app")
+    );
+  });
+
+  return writePerms;
+}
+
+// ─── Analisa uso/workloads do app ────────────────────────────────────────────
+function buildUsageAnalysis(app) {
+
+  const allPerms = []
+    .concat(app.appRoles || [])
+    .concat(app.delegated || []);
+
+  const workloads = [];
+
+  function has(prefix) {
+    return allPerms.some(function(p) {
+      return (p.name || "").startsWith(prefix);
+    });
+  }
+
+  if (has("Mail.")) workloads.push("Exchange Online");
+  if (has("Files.") || has("Sites.")) workloads.push("SharePoint/OneDrive");
+  if (has("Chat.") || has("Team.")) workloads.push("Microsoft Teams");
+  if (has("Device.")) workloads.push("Intune");
+  if (has("Directory.") || has("User.") || has("Group."))
+    workloads.push("Entra ID");
+
+  const automationOnly =
+    (app._lastSignIn &&
+      app._lastSignIn.clientAppUsed === "Other clients")
+      || false;
+
+  return {
+    workloads,
+    automationOnly,
+    hasWriteAccess: analyzeWritePermissions(app).length > 0,
+  };
+}
+
+// ─── Classificação de risco ──────────────────────────────────────────────────
+function calculateRisk(app) {
+
+  const perms = analyzeWritePermissions(app);
+
+  const criticalPerms = [
+    "Directory.ReadWrite.All",
+    "RoleManagement.ReadWrite.Directory",
+    "Application.ReadWrite.All",
+    "full_access_as_app",
+    "Mail.ReadWrite",
+    "Files.ReadWrite.All",
+    "Group.ReadWrite.All",
+  ];
+
+  let score = 0;
+
+  perms.forEach(function(p) {
+
+    if (
+      criticalPerms.some(function(c) {
+        return (p.name || "").includes(c);
+      })
+    ) {
+      score += 40;
+    } else {
+      score += 10;
+    }
+
+  });
+
+  if (app._lastSignIn) score += 10;
+  if (!app._owners || app._owners.length === 0) score += 20;
+
+  if (score >= 80) return "Critical";
+  if (score >= 50) return "High";
+  if (score >= 25) return "Medium";
+
+  return "Low";
+}
+
 // Service Principals para resolver nomes de permissoes
 async function getAllSPs(token) {
   return graphPaged("/servicePrincipals?$select=displayName,appId,oauth2PermissionScopes,appRoles&$top=999", token, 10000);
@@ -177,7 +298,11 @@ async function collectApps(token) {
     var chunk = apps.slice(i, i + chunkSize);
     var ownersChunk = await Promise.all(chunk.map(function(a) { return getAppOwners(a.id, token); }));
     for (var j = 0; j < chunk.length; j++) {
-      chunk[j]._owners = ownersChunk[j];
+      chunk[j]._owners = ownersChunk[j]
+      chunk[j]._lastSignIn = await getLastSignIn(
+      chunk[j].appId,
+      token
+);
 
       // Busca logs pelo objectId (id), pelo appId e pelo displayName
       var appLogs = []
@@ -273,6 +398,23 @@ async function collectApps(token) {
       };
     });
 
+    const appObject = Object.assign({}, application, {
+  appRoles,
+  delegated,
+  secrets,
+});
+
+appObject._writePermissions =
+  analyzeWritePermissions(appObject);
+
+appObject._usageAnalysis =
+  buildUsageAnalysis(appObject);
+
+appObject._riskLevel =
+  calculateRisk(appObject);
+
+return appObject;
+
     return Object.assign({}, application, { appRoles, delegated, secrets });
   });
 
@@ -364,7 +506,7 @@ function fmtDateOnly(d) { if (!d) return "—"; return new Date(d).toLocaleDateS
 // ─── Rotas ────────────────────────────────────────────────────────────────────
 app.get("/", async (req, res) => {
   const authUrl = await cca.getAuthCodeUrl({
-    scopes: ["User.Read","Directory.Read.All","Application.Read.All","AuditLog.Read.All"],
+    scopes: ["User.Read","Directory.Read.All","Application.Read.All","AuditLog.Read.All","Directory.AccessAsUser.All"],
     redirectUri: REDIRECT_URI,
     prompt: "select_account",
   });
@@ -702,6 +844,90 @@ function buildDashboard(session, sessionId) {
         }).join("")+'</div>'
       : '<span style="color:#3a5068;font-size:12px">Nenhuma atividade registrada nos ultimos 30 dias</span>';
 
+      var lastSignInHtml = a._lastSignIn
+  ? '<div class="audit-wrap">' +
+      '<div class="audit-item">' +
+        '<span class="audit-action">Último uso registrado</span>' +
+        '<span class="audit-time">' +
+          fmtDate(a._lastSignIn.createdDateTime) +
+        '</span>' +
+      '</div>' +
+
+      '<div class="audit-item">' +
+        '<span class="audit-action">Usuário</span>' +
+        '<span>' +
+          (a._lastSignIn.userDisplayName || "N/A") +
+        '</span>' +
+      '</div>' +
+
+      '<div class="audit-item">' +
+        '<span class="audit-action">IP</span>' +
+        '<span>' +
+          (a._lastSignIn.ipAddress || "N/A") +
+        '</span>' +
+      '</div>' +
+
+      '<div class="audit-item">' +
+        '<span class="audit-action">Client</span>' +
+        '<span>' +
+          (a._lastSignIn.clientAppUsed || "N/A") +
+        '</span>' +
+      '</div>' +
+    '</div>'
+  : '<span style="color:#3a5068">Nenhum sign-in encontrado</span>';
+
+var usageHtml =
+  '<div class="audit-wrap">' +
+
+    '<div class="audit-item">' +
+      '<span class="audit-action">Risk Level</span>' +
+      '<span>' + a._riskLevel + '</span>' +
+    '</div>' +
+
+    '<div class="audit-item">' +
+      '<span class="audit-action">Workloads</span>' +
+      '<span>' +
+        (a._usageAnalysis.workloads.join(", ") || "N/A") +
+      '</span>' +
+    '</div>' +
+
+    '<div class="audit-item">' +
+      '<span class="audit-action">Write Permissions</span>' +
+      '<span>' +
+        a._writePermissions.length +
+      '</span>' +
+    '</div>' +
+
+    '<div class="audit-item">' +
+      '<span class="audit-action">Automation Only</span>' +
+      '<span>' +
+        (a._usageAnalysis.automationOnly ? "YES" : "NO") +
+      '</span>' +
+    '</div>' +
+
+  '</div>';
+
+var riskHtml =
+  '<div class="audit-wrap">' +
+
+    '<div class="audit-item">' +
+      '<span class="audit-action">Classificação</span>' +
+      '<span>' + a._riskLevel + '</span>' +
+    '</div>' +
+
+    a._writePermissions.map(function(p) {
+      return (
+        '<div class="audit-item">' +
+          '<span class="audit-action">' +
+            (p.name || p.id) +
+          '</span>' +
+          '<span style="color:#ef4444">WRITE</span>' +
+        '</div>'
+      );
+    }).join("") +
+
+  '</div>';
+
     return '<tr class="ar'+(isRisky?" risky":"")+'" onclick="toggle(\'rx-'+uid+'\')">' +
       '<td><div class="app-name">'+(a.displayName||"—")+
         (isRisky?'<span class="risk-badge">App Perm</span>':'')+
@@ -720,11 +946,19 @@ function buildDashboard(session, sessionId) {
         '<div class="etab" onclick="etab(this,\'esg-'+uid+'\')">💡 Sugestoes'+(sugg.add.length+sugg.remove.length>0?' <span class="sugg-count">'+(sugg.add.length+sugg.remove.length)+'</span>':'')+'</div>'+
         '<div class="etab" onclick="etab(this,\'esr-'+uid+'\')">🔐 Secrets</div>'+
         '<div class="etab" onclick="etab(this,\'eat-'+uid+'\')">📋 Atividade</div>'+
+        '<div class="etab" onclick="etab(this,\'els-'+uid+'\')">🕒 Último Uso</div>'+
+        '<div class="etab" onclick="etab(this,\'eus-'+uid+'\')">🌐 Uso</div>'+
+        '<div class="etab" onclick="etab(this,\'erk-'+uid+'\')">🚨 Risco</div>'+
       '</div>'+
       '<div id="epp-'+uid+'" class="epanel active"><div class="perm-wrap">'+permsHtml+'</div></div>'+
       '<div id="esg-'+uid+'" class="epanel" style="display:none"><div class="sugg-wrap">'+suggHtml+'</div></div>'+
       '<div id="esr-'+uid+'" class="epanel" style="display:none">'+secretsHtml+'</div>'+
       '<div id="eat-'+uid+'" class="epanel" style="display:none">'+auditHtml+'</div>'+
+      '<div id="els-'+uid+'" class="epanel" style="display:none">'+lastSignInHtml+'</div>'+
+      '<div id="eus-'+uid+'" class="epanel" style="display:none">'+usageHtml+'</div>'+
+      '<div id="erk-'+uid+'" class="epanel" style="display:none">'+riskHtml+'</div>'+
+      
+  
     '</td></tr>';
   }
 
