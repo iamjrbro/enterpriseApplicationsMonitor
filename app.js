@@ -3,14 +3,7 @@ const express = require("express");
 const { ConfidentialClientApplication } = require("@azure/msal-node");
 const axios = require("axios");
 
-
-// altere a redirect URI para a do app onde seu dashboard será hospedado
-
 const app = express();
-
-// para que fique somente interna da empresa/tenant no Microsoft Entra ID alete a linha abaixo para o tenantId específico da sua organização, por exemplo: "https://login.microsoftonline.com/seu-tenant-id"
-// "https://login.microsoftonline.com/SEU_TENANT_ID" ou "https://login.microsoftonline.com/seudominio.onmicrosoft.com"
-
 const REDIRECT_URI = "https://enterprise-applications-monitor.onrender.com";
 
 const cca = new ConfidentialClientApplication({
@@ -20,38 +13,6 @@ const cca = new ConfidentialClientApplication({
     clientSecret: process.env.CLIENT_SECRET,
   },
 });
-
-
-/* 
-
-> outra opção é validar manualmente o domínio do usuário no código
-
- const user = tokenResponse.account;
-
-if (
-  !user.username.endsWith("@empresa.com")
-) {
-  return res
-    .status(403)
-    .send("Acesso não autorizado");
-}
-    
-> ou validar Object IDs específicos
-
-const allowedUsers = [
-  "GUID1",
-  "GUID2"
-];
-
-if (
-  !allowedUsers.includes(
-    tokenResponse.account.homeAccountId
-  )
-) {
-  return res.status(403).send("Sem acesso");
-}
-
-*/
 
 const sessions = {};
 
@@ -512,13 +473,7 @@ function buildLoadingPage(sessionId, tenantId) {
   return '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Carregando...</title>'+
 '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:"SF Mono",Monaco,monospace;background:#060a0f;color:#c8d8e8;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}'+
 '.card{background:#0d1520;border:1px solid #1a2840;border-radius:16px;padding:48px 40px;max-width:580px;width:100%}'+
-
-'.header{display:flex;align-items:center;gap:16px;margin-bottom:10px}'+
-
-'.logoSvg{flex-shrink:0}'+
-
-'h1{font-size:18px;color:#4fc3f7;letter-spacing:2px;text-transform:uppercase;line-height:1.3}'+
-
+'h1{font-size:18px;color:#4fc3f7;margin-bottom:4px;letter-spacing:2px;text-transform:uppercase}'+
 '.tid{font-size:11px;color:#3a5068;margin-bottom:32px;font-family:monospace}'+
 '.bar-wrap{height:2px;background:#0a1525;border-radius:2px;margin-bottom:32px}'+
 '.bar{height:100%;background:linear-gradient(90deg,#0ea5e9,#38bdf8,#7dd3fc);border-radius:2px;width:0%;transition:width .8s cubic-bezier(.4,0,.2,1)}'+
@@ -535,102 +490,37 @@ function buildLoadingPage(sessionId, tenantId) {
 '.sub{font-size:12px;color:#3a5068;margin-top:4px;letter-spacing:2px;text-transform:uppercase}'+
 '.btn{display:inline-block;margin-top:24px;padding:12px 32px;background:linear-gradient(135deg,#0369a1,#0ea5e9);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;letter-spacing:1px;text-transform:uppercase}'+
 '</style></head><body>'+
-
-'<div class="card">'+
-
-'<div class="header">'+
-
-'<svg class="logoSvg" width="48" height="48" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">'+
-'<circle cx="32" cy="32" r="30" stroke="#3B82F6" stroke-width="3"/>'+
-'<rect x="14" y="28" width="10" height="18" rx="2" fill="#0F172A"/>'+
-'<rect x="26" y="18" width="16" height="28" rx="2" fill="#0F172A"/>'+
-'<rect x="30" y="22" width="3" height="3" fill="#3B82F6"/>'+
-'<rect x="35" y="22" width="3" height="3" fill="#3B82F6"/>'+
-'<rect x="30" y="28" width="3" height="3" fill="#3B82F6"/>'+
-'<rect x="35" y="28" width="3" height="3" fill="#3B82F6"/>'+
-'<rect x="30" y="34" width="3" height="3" fill="#3B82F6"/>'+
-'<rect x="35" y="34" width="3" height="3" fill="#3B82F6"/>'+
-'<circle cx="43" cy="42" r="8" stroke="#2563EB" stroke-width="3" fill="white"/>'+
-'<rect x="39" y="38" width="8" height="8" rx="1.5" fill="#3B82F6"/>'+
-'<line x1="48" y1="47" x2="54" y2="53" stroke="#2563EB" stroke-width="3" stroke-linecap="round"/>'+
-'</svg>'+
-
-'<h1>ENTERPRISE APPLICATIONS MONITOR</h1>'+
-
-'</div>'+
-
-'<div class="tid">'+tenantId+'</div>'+
-
+'<div class="card"><h1>// APP MONITOR</h1><div class="tid">'+tenantId+'</div>'+
 '<div class="bar-wrap"><div class="bar" id="bar"></div></div>'+
-
 '<div class="steps" id="steps"></div>'+
-
 '<div class="reveal" id="reveal"><div class="big" id="bigNum">—</div><div class="sub">aplicacoes encontradas</div><a class="btn" id="btn" href="#">ABRIR MONITOR</a></div></div>'+
-
 '<script>'+
 'var total=5,done=0,active=null;'+
 'var stepsEl=document.getElementById("steps"),bar=document.getElementById("bar");'+
 'var es=new EventSource("/progress/'+sessionId+'");'+
-
 'es.onmessage=function(e){'+
 '  var d=JSON.parse(e.data);'+
-
 '  if(d.type==="step"){'+
 '    if(d.status==="running"){'+
-
-'      if(active){'+
-'        active.className="step done";'+
-'        active.querySelector(".icon").innerHTML="✓";'+
-'        done++;'+
-'        bar.style.width=Math.min(92,Math.round(done/total*100))+"%";'+
-'      }'+
-
-'      var el=document.createElement("div");'+
-'      el.className="step running";'+
-
+'      if(active){active.className="step done";active.querySelector(".icon").innerHTML="✓";done++;bar.style.width=Math.min(92,Math.round(done/total*100))+"%";}'+
+'      var el=document.createElement("div");el.className="step running";'+
 '      el.innerHTML="<div class=\\"icon\\"><div class=\\"spinner\\"></div></div><span>"+d.label+"</span>";'+
-
-'      stepsEl.appendChild(el);'+
-'      el.scrollIntoView({behavior:"smooth"});'+
-'      active=el;'+
-'    }'+
-
-'    else if(d.status==="done"&&active){'+
-'      active.querySelector("span").textContent=d.label;'+
-'    }'+
+'      stepsEl.appendChild(el);el.scrollIntoView({behavior:"smooth"});active=el;'+
+'    } else if(d.status==="done"&&active){active.querySelector("span").textContent=d.label;}'+
 '  }'+
-
 '  if(d.type==="done"){'+
-
-'    if(active){'+
-'      active.className="step done";'+
-'      active.querySelector(".icon").innerHTML="✓";'+
-'    }'+
-
-'    bar.style.width="100%";'+
-'    es.close();'+
-
+'    if(active){active.className="step done";active.querySelector(".icon").innerHTML="✓";}'+
+'    bar.style.width="100%";es.close();'+
 '    document.getElementById("btn").href="/dashboard/'+sessionId+'";'+
 '    document.getElementById("reveal").style.display="block";'+
 '  }'+
-
 '  if(d.type==="error"){'+
-
-'    if(active){'+
-'      active.className="step error";'+
-'      active.querySelector(".icon").innerHTML="✗";'+
-'    }'+
-
-'    var err=document.createElement("div");'+
-'    err.className="step error";'+
-
+'    if(active){active.className="step error";active.querySelector(".icon").innerHTML="✗";}'+
+'    var err=document.createElement("div");err.className="step error";'+
 '    err.innerHTML="<div class=\\"icon\\">✗</div><span>Erro: "+d.message+"</span>";'+
-
-'    stepsEl.appendChild(err);'+
-'    es.close();'+
+'    stepsEl.appendChild(err);es.close();'+
 '  }'+
 '};'+
-
 '</script></body></html>';
 }
 
@@ -890,7 +780,7 @@ function buildDashboard(session, sessionId) {
 
   return '<!DOCTYPE html><html lang="pt-BR"><head>'+
 '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+
-'<title>ENTERPRISE APPLICATIONS MONITOR</title>'+
+'<title>App Monitor</title>'+
 '<style>'+
 '@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap");'+
 '*{box-sizing:border-box;margin:0;padding:0}'+
@@ -1015,7 +905,7 @@ function buildDashboard(session, sessionId) {
 
 '<div class="hdr">'+
   '<div class="hdr-brand">'+
-    '<div><h1>ENTERPRISE APPLICATIONS MONITOR</h1><div class="tid">'+session.tenantId+'</div></div>'+
+    '<div><h1>// APP MONITOR</h1><div class="tid">'+session.tenantId+'</div></div>'+
   '</div>'+
   '<div class="hdr-right">'+
     '<div class="live"><div class="dot"></div>LIVE</div>'+
