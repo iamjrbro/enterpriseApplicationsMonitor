@@ -91,16 +91,40 @@ async function getAuditLogs(token) {
 async function getLastSignIn(appId, token) {
   try {
     const safeId = appId.replace(/'/g, "''");
-    const url = "https://graph.microsoft.com/beta/auditLogs/signIns" +
+    const base = "https://graph.microsoft.com/beta/auditLogs/signIns";
+
+    const userUrl = base +
       "?$filter=appId eq '" + safeId + "'" +
-      "&$orderby=createdDateTime desc&$top=3" +
-      "&$select=createdDateTime,userDisplayName,userPrincipalName,ipAddress,clientAppUsed,status,location,conditionalAccessStatus,resourceDisplayName";
-    const res = await axios.get(url, { headers: { Authorization: "Bearer " + token } });
-    return res.data.value && res.data.value.length > 0 ? res.data.value : null;
+      "&$orderby=createdDateTime desc&$top=1" +
+      "&$select=createdDateTime,userDisplayName,userPrincipalName,ipAddress,clientAppUsed,resourceDisplayName,signInEventTypes";
+
+    const spUrl = base +
+      "?$filter=appId eq '" + safeId + "' and signInEventTypes/any(t: t eq 'servicePrincipal')" +
+      "&$orderby=createdDateTime desc&$top=1" +
+      "&$select=createdDateTime,servicePrincipalName,servicePrincipalId,ipAddress,resourceDisplayName,signInEventTypes";
+
+    const results = await Promise.allSettled([
+      axios.get(userUrl, { headers: { Authorization: "Bearer " + token } }),
+      axios.get(spUrl, { headers: { Authorization: "Bearer " + token } }),
+    ]);
+
+    const signIns = [];
+    results.forEach(function(r) {
+      if (r.status === "fulfilled" && r.value.data.value) {
+        signIns.push.apply(signIns, r.value.data.value);
+      }
+    });
+
+    signIns.sort(function(a, b) {
+      return new Date(b.createdDateTime) - new Date(a.createdDateTime);
+    });
+
+    return signIns.length > 0 ? signIns.slice(0, 3) : null;
   } catch (e) {
     return null;
   }
 }
+
 
 // Service principal do app para pegar info de onde e usado
 async function getServicePrincipalByAppId(appId, token) {
@@ -549,6 +573,29 @@ function buildDashboard(session, sessionId) {
   var appsWithSecrets = apps.filter(function(a) { return a.secrets && a.secrets.length > 0; });
   var expSecrets      = apps.filter(function(a) { return (a.secrets || []).some(function(s) { return s.status === "expirada" || s.status === "expirando"; }); });
   var criticalApps    = apps.filter(function(a) { return a._riskLevel === "Critical"; });
+  var writeGroupsApps = apps.filter(function(a) {
+  return getWriteCategories(a).includes("groups");
+});
+var writeUsersApps = apps.filter(function(a) {
+  return getWriteCategories(a).includes("users");
+});
+var writeEmailApps = apps.filter(function(a) {
+  return getWriteCategories(a).includes("email");
+});
+var writeFilesApps = apps.filter(function(a) {
+  return getWriteCategories(a).includes("files");
+});
+
+'<div id="tp-writegroups" class="tab-panel">' + buildTabTable(writeGroupsApps, "Nenhum app com Write em Groups", "writegroups") + '</div>' +
+'<div id="tp-writeusers" class="tab-panel">' + buildTabTable(writeUsersApps, "Nenhum app com Write em Users", "writeusers") + '</div>' +
+'<div id="tp-writeemail" class="tab-panel">' + buildTabTable(writeEmailApps, "Nenhum app com Write em E-mail", "writeemail") + '</div>' +
+'<div id="tp-writefiles" class="tab-panel">' + buildTabTable(writeFilesApps, "Nenhum app com Write em Files/Sites", "writefiles") + '</div>' +
+
+switchMainTab('writegroups', this)
+switchMainTab('writeusers', this)
+switchMainTab('writeemail', this)
+switchMainTab('writefiles', this)
+
 
   // ── Tooltips ──────────────────────────────────────────────────────────────
   var RISK_TOOLTIPS = {
@@ -619,6 +666,30 @@ function buildDashboard(session, sessionId) {
     return suggestions;
   }
 
+
+  // ── Categorias de Write -  Filtros para Write em Groups, Users, E-mail etc ─────────────────────────────────────────────────────
+
+  function getWriteCategories(app) {
+  const writePerms = app._writePermissions || [];
+  const categories = [];
+
+  function has(prefixes) {
+    return writePerms.some(function(p) {
+      const n = p.name || "";
+      return prefixes.some(function(prefix) { return n.startsWith(prefix); });
+    });
+  }
+
+  if (has(["Group."])) categories.push("groups");
+  if (has(["User."])) categories.push("users");
+  if (has(["Mail.", "MailboxSettings."])) categories.push("email");
+  if (has(["Files.", "Sites."])) categories.push("files");
+  if (has(["Directory.", "RoleManagement."])) categories.push("directory");
+  if (has(["Application."])) categories.push("apps");
+
+  return categories;
+}
+
   // ── buildAppRow ────────────────────────────────────────────────────────────
   function buildAppRow(a, tabPrefix) {
     tabPrefix = tabPrefix || "all";
@@ -636,6 +707,17 @@ function buildDashboard(session, sessionId) {
     var riskBadgeColor = a._riskLevel === "Critical" ? "#ef4444" : a._riskLevel === "High" ? "#f59e0b" : a._riskLevel === "Medium" ? "#a78bfa" : "#4ade80";
 
     var notesHtml = a.notes ? '<div class="notes-box"><span class="notes-label">📝 Notas:</span> ' + escapeHtml(a.notes) + '</div>' : "";
+    
+    // Ultimo uso — sign-ins
+    
+    var lastUsedHtml = "Nunca detectado";
+    var lastUsedSort = 99999;
+
+    if (a._lastSignIn && a._lastSignIn.length > 0) {
+      var lastUsed = a._lastSignIn[0].createdDateTime;
+      lastUsedSort = Math.floor((Date.now() - new Date(lastUsed).getTime()) / 86400000);
+      lastUsedHtml = lastUsedSort === 0 ? "Hoje" : lastUsedSort + " dias";
+    }
 
     // Permissoes
     var permsHtml = allPerms.length === 0
@@ -751,6 +833,19 @@ function buildDashboard(session, sessionId) {
         return '<div class="audit-item"><span style="color:' + riskColor[risk] + ';font-weight:600">' + escapeHtml(permLabel(p)) + '</span><span style="color:#3a5068;font-size:10px">' + escapeHtml(getPermTooltip(p.name, p.description, risk).substring(0, 80)) + '...</span></div>';
       }).join("") : '<div class="audit-item"><span style="color:#4ade80">✅ Nenhuma permissao de escrita</span></div>') +
     '</div>';
+      var lastUsedHtml = '<span style="color:#ef4444">Nunca detectado</span>';
+
+      if (a._lastSignIn && a._lastSignIn.length > 0) {
+        var lastUsed = a._lastSignIn[0].createdDateTime;
+        var daysSinceUse = Math.floor((Date.now() - new Date(lastUsed).getTime()) / 86400000);
+        var lastUsedColor = daysSinceUse > 90 ? "#ef4444" : daysSinceUse > 30 ? "#f59e0b" : "#4ade80";
+        var lastUsedText = daysSinceUse === 0 ? "Hoje" : daysSinceUse + " dias";
+
+        lastUsedHtml =
+          '<span style="color:' + lastUsedColor + ';font-family:JetBrains Mono,monospace;font-size:11px">' +
+          lastUsedText +
+          '</span>';
+      }
 
     return '<tr class="ar' + (isRisky ? " risky" : "") + '" onclick="toggle(\'rx-' + uid + '\')">' +
       '<td><div class="app-name">' + escapeHtml(a.displayName || "—") +
@@ -761,11 +856,13 @@ function buildDashboard(session, sessionId) {
         '<span class="rl-badge" style="border-color:' + riskBadgeColor + ';color:' + riskBadgeColor + '">' + a._riskLevel + '</span>' +
       '</div></td>' +
       '<td>' + fmtDate(a.createdDateTime) + '</td>' +
+      '<td>' + lastUsedHtml + '</td>' +
       '<td>' + createdBy + '</td>' +
       '<td>' + ownersStr + '</td>' +
       '<td style="text-align:center"><span style="color:#f59e0b">' + (a.appRoles || []).length + '</span> APP / <span style="color:#60a5fa">' + (a.delegated || []).length + '</span> DEL</td>' +
       '</tr>' +
-      '<tr id="rx-' + uid + '" style="display:none"><td colspan="5" class="expand-cell">' +
+      '<tr id="rx-' + uid + '" style="display:none"><td colspan="6" class="expand-cell">' +
+
         notesHtml +
         '<div class="expand-tabs">' +
           '<div class="etab active" onclick="etab(this,\'epp-' + uid + '\')">🔑 Permissoes</div>' +
@@ -788,7 +885,7 @@ function buildDashboard(session, sessionId) {
 
   function buildTabTable(list, emptyMsg, tabPrefix) {
     if (list.length === 0) return '<div class="empty-tab">' + emptyMsg + '</div>';
-    return '<table><thead><tr><th>Nome</th><th>Criado em</th><th>Criado por</th><th>Owner(s)</th><th>Permissoes</th></tr></thead><tbody>' +
+    return '<table><thead><tr><th>Nome</th><th>Criado em</th><th>Ultimo uso</th><th>Criado por</th><th>Owner(s)</th><th>Permissoes</th></tr></thead><tbody>' +
       list.map(function(a) { return buildAppRow(a, tabPrefix || "all"); }).join("") + '</tbody></table>';
   }
 
@@ -929,7 +1026,7 @@ function buildDashboard(session, sessionId) {
 '<div class="leg"><span style="color:#ef4444">■ Critico</span><span style="color:#f59e0b">■ Alto</span><span style="color:#4ade80">■ Normal</span><span>✏️ = Permissao Write | Clique para expandir</span></div></div>' +
 '<input class="search-bar" id="search" type="text" placeholder="Buscar por nome, owner, criador, permissao..." oninput="filterTable()">' +
 
-'<div id="tp-all" class="tab-panel active"><table><thead><tr><th>Nome</th><th>Criado em</th><th>Criado por</th><th>Owner(s)</th><th>Permissoes</th></tr></thead><tbody>' + allApps.map(function(a) { return buildAppRow(a, "all"); }).join("") + '</tbody></table></div>' +
+'<div id="tp-all" class="tab-panel active"><table><thead><tr><th>Nome</th><th>Criado em</th><th>Ultimo uso</th><th>Criado por</th><th>Owner(s)</th><th>Permissoes</th></tr></thead><tbody>' + allApps.map(function(a) { return buildAppRow(a, "all"); }).join("") + '</tbody></table></div>' +
 '<div id="tp-risky" class="tab-panel">' + buildTabTable(riskyApps, "Nenhum app com Application Permission", "risky") + '</div>' +
 '<div id="tp-write" class="tab-panel">' + buildTabTable(writeApps, "Nenhum app com permissoes de escrita", "write") + '</div>' +
 '<div id="tp-critical" class="tab-panel">' + buildTabTable(criticalApps, "Nenhum app com risco Critical", "critical") + '</div>' +
@@ -959,8 +1056,8 @@ function buildDashboard(session, sessionId) {
 '  el.classList.add("active-tab");' +
 '  document.querySelectorAll(".tab-panel").forEach(function(e){e.classList.remove("active");e.style.display="none";});' +
 '  var panel=document.getElementById("tp-"+name);if(panel){panel.classList.add("active");panel.style.display="block";}' +
-'  var labels={all:"Todas",risky:"App Permissions",write:"Permissoes Write",critical:"Risco Critical",recent:"Criados 30 dias",noowner:"Sem Owner",secrets:"Com Secrets",expsecrets:"Secrets Expirando"};' +
-'  var counts={all:document.getElementById("stTotal").textContent,risky:document.getElementById("stRisky").textContent,write:document.getElementById("stWrite").textContent,critical:document.getElementById("stCritical").textContent,recent:document.getElementById("stRecent").textContent,noowner:document.getElementById("stNoOwner").textContent,secrets:document.getElementById("stSecrets").textContent,expsecrets:document.getElementById("stExpSecrets").textContent};' +
+'  var labels={all:"Todas",risky:"App Permissions",write:"Permissoes Write",writegroups:"Write em Groups",writeusers:"Write em Users",writeemail:"Write em E-mail",writefiles:"Write em Files",critical:"Risco Critical",recent:"Criados 30 dias",noowner:"Sem Owner",secrets:"Com Secrets",expsecrets:"Secrets Expirando"};' +
+'  var counts={all:document.getElementById("stTotal").textContent,risky:document.getElementById("stRisky").textContent,write:document.getElementById("stWrite").textContent,writegroups:document.getElementById("stWriteGroups").textContent,writeusers:document.getElementById("stWriteUsers").textContent,writeemail:document.getElementById("stWriteEmail").textContent,writefiles:document.getElementById("stWriteFiles").textContent,critical:document.getElementById("stCritical").textContent,recent:document.getElementById("stRecent").textContent,noowner:document.getElementById("stNoOwner").textContent,secrets:document.getElementById("stSecrets").textContent,expsecrets:document.getElementById("stExpSecrets").textContent};'+
 '  document.getElementById("tabLabel").textContent=(labels[name]||name)+" ("+counts[name]+")";' +
 '  document.getElementById("search").value="";' +
 '}' +
