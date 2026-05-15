@@ -1011,8 +1011,9 @@ var riskHtml =
           }).join("")+'</div>';
         }
         return '<div class="change-item" style="border-left-color:'+color+'">'+
-          '<div class="change-top"><span>'+icon+'</span><span class="change-msg">'+escapeHtml(c.message)+'</span><span class="change-time">'+fmtDate(c.detectedAt)+'</span></div>'+
-          pd+'</div>';
+  '<div class="change-top"><span>'+icon+'</span><span class="change-msg">'+escapeHtml(c.message)+'</span><span class="change-time">'+fmtDate(c.detectedAt)+'</span></div>'+
+  pd+'</div>';
+
       }).join("");
 
 var initChangesJson = safeJson(changes24h.filter(function(c) {
@@ -1364,7 +1365,7 @@ var initChangesJson = safeJson(changes24h.filter(function(c) {
 '            }).join("")+"</div>";'+
 '          }'+
 '          return\'<div class="change-item" style="border-left-color:\'+color+\'">\'+'+
-'            \'<div class="change-top"><span>\'+icon+\'</span><span class="change-msg">\'+c.message+\'</span><span class="change-time">\'+new Date(c.detectedAt).toLocaleTimeString("pt-BR")+\'</span></div>\'+'+
+'            \'<div class="change-top"><span>\'+icon+\'</span><span class="change-msg">\'+esc(c.message)+\'</span><span class="change-time">\'+new Date(c.detectedAt).toLocaleTimeString("pt-BR")+\'</span></div>\'+'+
 '            pd+"</div>";'+
 '        }).join("");'+
 '      }'+
