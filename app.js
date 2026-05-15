@@ -16,6 +16,31 @@ const cca = new ConfidentialClientApplication({
 
 const sessions = {};
 
+const SCOPES = [
+  "User.Read",
+  "Directory.Read.All",
+  "Application.Read.All",
+  "AuditLog.Read.All",
+];
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeJson(value) {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+function normalizeODataString(value) {
+  return String(value || "").replace(/'/g, "''");
+}
+
+
 // ─── Graph helpers ────────────────────────────────────────────────────────────
 async function graphGet(url, token) {
   const res = await axios.get("https://graph.microsoft.com/v1.0" + url, {
@@ -106,27 +131,26 @@ function formatActor(actor) {
 // ─── Último uso do aplicativo (sign-ins) ─────────────────────────────────────
 async function getLastSignIn(appId, token) {
   try {
+    const safeAppId = normalizeODataString(appId);
     const url =
       "https://graph.microsoft.com/beta/auditLogs/signIns" +
-      "?$filter=appId eq '" + appId + "'" +
+      "?$filter=appId eq '" + safeAppId + "'" +
       "&$orderby=createdDateTime desc" +
       "&$top=1";
 
     const res = await axios.get(url, {
-      headers: {
-        Authorization: "Bearer " + token,
-      },
+      headers: { Authorization: "Bearer " + token },
     });
 
     return res.data.value && res.data.value.length > 0
       ? res.data.value[0]
       : null;
-
   } catch (e) {
     console.error("Erro last sign-in:", appId, e.message);
     return null;
   }
 }
+
 
 
 // ─── Detecta permissões perigosas/write ──────────────────────────────────────
@@ -135,19 +159,19 @@ function analyzeWritePermissions(app) {
     .concat(app.appRoles || [])
     .concat(app.delegated || []);
 
-  const writePerms = allPerms.filter(function(p) {
+  return allPerms.filter(function(p) {
     const n = (p.name || "").toLowerCase();
 
     return (
       n.includes("write") ||
       n.includes("readwrite") ||
-      n.includes(".all") ||
+      n.includes("manage") ||
+      n.includes("send") ||
       n.includes("full_access_as_app")
     );
   });
-
-  return writePerms;
 }
+
 
 // ─── Analisa uso/workloads do app ────────────────────────────────────────────
 function buildUsageAnalysis(app) {
@@ -296,13 +320,17 @@ async function collectApps(token) {
   var appsEnriched = [];
   for (var i = 0; i < apps.length; i += chunkSize) {
     var chunk = apps.slice(i, i + chunkSize);
-    var ownersChunk = await Promise.all(chunk.map(function(a) { return getAppOwners(a.id, token); }));
-    for (var j = 0; j < chunk.length; j++) {
-      chunk[j]._owners = ownersChunk[j]
-      chunk[j]._lastSignIn = await getLastSignIn(
-      chunk[j].appId,
-      token
-);
+    var ownersChunk = await Promise.all(chunk.map(function(a) {
+        return getAppOwners(a.id, token);
+      }));
+
+      var signInsChunk = await Promise.all(chunk.map(function(a) {
+        return getLastSignIn(a.appId, token);
+      }));
+
+      for (var j = 0; j < chunk.length; j++) {
+        chunk[j]._owners = ownersChunk[j];
+        chunk[j]._lastSignIn = signInsChunk[j];
 
       // Busca logs pelo objectId (id), pelo appId e pelo displayName
       var appLogs = []
@@ -398,28 +426,22 @@ async function collectApps(token) {
       };
     });
 
+  
     const appObject = Object.assign({}, application, {
   appRoles,
   delegated,
   secrets,
 });
 
-appObject._writePermissions =
-  analyzeWritePermissions(appObject);
+appObject._writePermissions = analyzeWritePermissions(appObject);
+appObject._usageAnalysis = buildUsageAnalysis(appObject);
+appObject._riskLevel = calculateRisk(appObject);
 
-appObject._usageAnalysis =
-  buildUsageAnalysis(appObject);
+return appObject;});
 
-appObject._riskLevel =
-  calculateRisk(appObject);
-
-return appObject;
-
-    return Object.assign({}, application, { appRoles, delegated, secrets });
-  });
-
-  return result;
+return result;
 }
+
 
 // ─── Detecta mudancas entre snapshots ────────────────────────────────────────
 function detectChanges(prevApps, currApps) {
@@ -481,7 +503,7 @@ function detectChanges(prevApps, currApps) {
       var recentLog = (curr._auditLogs||[])
         .filter(function(l){ return (Date.now()-new Date(l.timestamp).getTime()) < 3600000; })
         .sort(function(a,b){return new Date(b.timestamp)-new Date(a.timestamp);})[0];
-      var changedBy = recentLog ? " por " + recentLog.actor : "";
+      var changedBy = recentLog && recentLog.isHuman ? " por " + recentLog.actor : "";
 
       changes.push({ type:"permissao", severity:worst, appId, appName: curr.displayName||appId, message:(curr.displayName||appId)+": "+permChanges.length+" alteracao(es)"+changedBy, permChanges });
     }
@@ -506,21 +528,23 @@ function fmtDateOnly(d) { if (!d) return "—"; return new Date(d).toLocaleDateS
 // ─── Rotas ────────────────────────────────────────────────────────────────────
 app.get("/", async (req, res) => {
   const authUrl = await cca.getAuthCodeUrl({
-    scopes: ["User.Read","Directory.Read.All","Application.Read.All","AuditLog.Read.All","Directory.AccessAsUser.All"],
+    scopes: SCOPES,
     redirectUri: REDIRECT_URI,
     prompt: "select_account",
   });
   res.redirect(authUrl);
 });
 
+
 app.get("/callback", async (req, res) => {
   if (!req.query.code) return res.status(400).send("Codigo nao encontrado.");
   try {
-    const tokenResponse = await cca.acquireTokenByCode({
-      code: req.query.code,
-      scopes: ["User.Read","Directory.Read.All","Application.Read.All","AuditLog.Read.All"],
-      redirectUri: REDIRECT_URI,
-    });
+   const tokenResponse = await cca.acquireTokenByCode({
+  code: req.query.code,
+  scopes: SCOPES,
+  redirectUri: REDIRECT_URI,
+});
+
     const sessionId = Math.random().toString(36).slice(2);
     sessions[sessionId] = {
       token: tokenResponse.accessToken,
@@ -765,22 +789,28 @@ function buildDashboard(session, sessionId) {
   // ── buildAppRow com prefixo de aba para IDs unicos ───────────────────────────
   function buildAppRow(a, tabPrefix) {
     tabPrefix = tabPrefix || "all";
-    var uid = tabPrefix + "-" + a.appId; // ID unico por aba para evitar conflito de IDs
+    var uid = (tabPrefix + "-" + a.appId).replace(/[^a-zA-Z0-9_-]/g, "_"); // ID unico por aba para evitar conflito de IDs
     var allPerms = (a.appRoles||[]).concat(a.delegated||[]);
     var isRisky = a.appRoles && a.appRoles.length>0;
-    var owners = (a._owners||[]).map(function(o){ return o.displayName||o.userPrincipalName||o.mail||"?"; });
-    var ownersStr = owners.length>0 ? owners.join(", ") : '<span style="color:#ef4444">Sem owner</span>';
+    var owners = (a._owners || []).map(function(o) {
+  return escapeHtml(o.displayName || o.userPrincipalName || o.mail || "?");
+});
+    var ownersStr = owners.length > 0
+      ? owners.join(", ")
+      : '<span style="color:#ef4444">Sem owner</span>';
+
     // Prioriza usuario humano; fallback para sistema ou mensagem de log antigo
     var createdBy = a._createdBy
-      ? a._createdBy
-      : a._createdBySystem
-        ? '<span style="color:#3a5068;font-size:10px">via ' + a._createdBySystem + '</span>'
-        : '<span style="color:#2a4060;font-size:10px">Anterior a 30 dias</span>';
+  ? escapeHtml(a._createdBy)
+  : a._createdBySystem
+    ? '<span style="color:#3a5068;font-size:10px">via ' + escapeHtml(a._createdBySystem) + '</span>'
+    : '<span style="color:#2a4060;font-size:10px">Anterior a 30 dias</span>';
+
 
     // Notas internas
     var notesHtml = a.notes
-      ? '<div class="notes-box"><span class="notes-label">📝 Notas internas:</span> '+a.notes+'</div>'
-      : '';
+  ? '<div class="notes-box"><span class="notes-label">Notas internas:</span> ' + escapeHtml(a.notes) + '</div>'
+  : "";
 
     // Permissoes com tooltip de risco individual
     var permsHtml = allPerms.length===0
@@ -788,10 +818,9 @@ function buildDashboard(session, sessionId) {
       : allPerms.map(function(p){
           var risk = classifyPerm(p.name);
           var isApp = !!(a.appRoles||[]).find(function(r){return r.id===p.id;});
-          var label = permLabel(p);
-          var tooltip = getPermTooltip(p.name, p.description, risk);
-          // Escapa aspas para nao quebrar o HTML do title
-          tooltip = tooltip.replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+          var label = escapeHtml(permLabel(p));
+          var tooltip = escapeHtml(getPermTooltip(p.name, p.description, risk));
+
           return '<div class="pb-wrap">'+
             '<span class="pb" style="border-color:'+riskColor[risk]+';color:'+riskColor[risk]+'" data-tooltip="'+tooltip+'">'+
               '<span class="pt">'+(isApp?"APP":"DEL")+'</span> '+label+
@@ -929,7 +958,7 @@ var riskHtml =
   '</div>';
 
     return '<tr class="ar'+(isRisky?" risky":"")+'" onclick="toggle(\'rx-'+uid+'\')">' +
-      '<td><div class="app-name">'+(a.displayName||"—")+
+      '<td><div class="app-name">'+escapeHtml(a.displayName || "—")+
         (isRisky?'<span class="risk-badge">App Perm</span>':'')+
         ((a.secrets&&a.secrets.length>0)?'<span class="secret-badge">'+a.secrets.length+' secret(s)</span>':'')+
         (a.notes?'<span class="notes-badge">📝 notas</span>':'')+
@@ -982,11 +1011,13 @@ var riskHtml =
           }).join("")+'</div>';
         }
         return '<div class="change-item" style="border-left-color:'+color+'">'+
-          '<div class="change-top"><span>'+icon+'</span><span class="change-msg">'+c.message+'</span><span class="change-time">'+fmtDate(c.detectedAt)+'</span></div>'+
+          '<div class="change-top"><span>'+icon+'</span><span class="change-msg">'+escapeHtml(c.message)+'</span><span class="change-time">'+fmtDate(c.detectedAt)+'</span></div>'+
           pd+'</div>';
       }).join("");
 
-  var initChangesJson = JSON.stringify(changes24h.filter(function(c){ return (Date.now()-new Date(c.detectedAt).getTime())<300000; }));
+var initChangesJson = safeJson(changes24h.filter(function(c) {
+  return (Date.now() - new Date(c.detectedAt).getTime()) < 300000;
+}));
 
   // Secrets expirando/expiradas para painel lateral
   var allSecretIssues = [];
@@ -1254,13 +1285,22 @@ var riskHtml =
 '  var q=document.getElementById("search").value.toLowerCase();'+
 '  var panelId="tp-"+currentTab;'+
 '  var rows=document.querySelectorAll("#"+panelId+" tr.ar");'+
+
 '  rows.forEach(function(row){'+
 '    var text=row.textContent.toLowerCase();'+
-'    var show=q===""||text.includes(q);'+
-'    row.style.display=show?"":"none";'+
-'    var id=row.getAttribute("onclick").replace("toggle(\'r-","").replace("\')","")||"";'+
-'    var exp=document.getElementById("r-"+id.split("\'")[0]);'+
-'    if(exp&&!show)exp.style.display="none";'+
+'    var show=q==="" || text.includes(q);'+
+
+'    row.style.display=show ? "" : "none";'+
+
+'    var onclick=row.getAttribute("onclick") || "";'+
+'    var match=onclick.match(/toggle\\(\'([^\']+)\'\\)/);'+
+
+'    if(match){'+
+'      var exp=document.getElementById(match[1]);'+
+'      if(exp && !show){'+
+'        exp.style.display="none";'+
+'      }'+
+'    }'+
 '  });'+
 '}'+
 
@@ -1278,6 +1318,15 @@ var riskHtml =
 
 // Atualiza stat com flash
 'function upd(id,v){var el=document.getElementById(id);if(el&&el.textContent!=String(v)){el.textContent=v;el.classList.remove("changed");void el.offsetWidth;el.classList.add("changed");}}'+
+
+'function esc(s){'+
+'  return String(s==null?"":s)'+
+'    .replace(/&/g,"&amp;")'+
+'    .replace(/</g,"&lt;")'+
+'    .replace(/>/g,"&gt;")'+
+'    .replace(/"/g,"&quot;")'+
+'    .replace(/\\\'/g,"&#39;");'+
+'}'+
 
 // Refresh
 'function doRefresh(){'+
@@ -1310,7 +1359,8 @@ var riskHtml =
 '          if(c.permChanges&&c.permChanges.length>0){'+
 '            pd=\'<div class="perm-changes">\'+c.permChanges.map(function(pc){'+
 '              var pcc=pc.action==="adicionada"?(pc.severity==="critico"?"#ef4444":"#f59e0b"):"#4ade80";'+
-'              return\'<span class="pc" style="color:\'+pcc+\'">\'+( pc.action==="adicionada"?"+":"-")+\' [\'+pc.type+\'] \'+pc.name+"</span>";'+
+'              return\'<span class="pc" style="color:\'+pcc+\'">\'+(pc.action==="adicionada"?"+":"-")+\' [\'+esc(pc.type)+\'] \'+esc(pc.name)+"</span>";'+
+
 '            }).join("")+"</div>";'+
 '          }'+
 '          return\'<div class="change-item" style="border-left-color:\'+color+\'">\'+'+
@@ -1330,12 +1380,13 @@ var riskHtml =
 '  });'+
 '}'+
 
+
 'function showToast(c){'+
 '  var area=document.getElementById("toast-area");'+
 '  var icons={critico:"🚨",aviso:"⚠️",melhora:"✅",info:"ℹ️"};'+
 '  var t=document.createElement("div");'+
-'  t.className="toast "+(c.severity||"info");'+
-'  t.innerHTML=\'<span>\'+( icons[c.severity]||"ℹ️")+\'</span><span>\'+c.message+\'</span><span class="tc" onclick="this.parentElement.remove()">×</span>\';'+
+'  t.className="toast "+esc(c.severity||"info");'+
+'  t.innerHTML=\'<span>\'+(icons[c.severity]||"ℹ️")+\'</span><span>\'+esc(c.message)+\'</span><span class="tc" onclick="this.parentElement.remove()">×</span>\';'+
 '  area.appendChild(t);'+
 '  setTimeout(function(){if(t.parentElement)t.remove();},10000);'+
 '}'+
@@ -1345,4 +1396,5 @@ var riskHtml =
 '</script></body></html>';
 }
 
-app.listen(3001, () => console.log("📦 App Monitor rodando em http://localhost:3001"));
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log("App Monitor rodando na porta " + PORT));
