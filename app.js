@@ -4,7 +4,7 @@ const { ConfidentialClientApplication } = require("@azure/msal-node");
 const axios = require("axios");
 
 const app = express(); const REDIRECT_URI = process.env.REDIRECT_URI ||
-"https://enterprise-applications-monitor.onrender.com/callback";
+"app-enterprisemonitor-buead9fgg4fnevh8.centralus-01.azurewebsites.net/callback";
 
 const cca = new ConfidentialClientApplication({
   auth: {
