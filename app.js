@@ -3,8 +3,9 @@ const express = require("express");
 const { ConfidentialClientApplication } = require("@azure/msal-node");
 const axios = require("axios");
 
-const app = express(); const REDIRECT_URI = process.env.REDIRECT_URI ||
-"https://enterprise-applications-monitor.onrender.com/callback";
+const app = express();
+const REDIRECT_URI = process.env.REDIRECT_URI ||
+  "https://enterprise-applications-monitor.onrender.com/callback";
 
 const cca = new ConfidentialClientApplication({
   auth: {
@@ -87,52 +88,29 @@ async function getAuditLogs(token) {
   }
 }
 
-// Ultimo sign-in do app — busca sign-ins de usuario E de service principal
 async function getLastSignIn(appId, token) {
   try {
     const safeId = appId.replace(/'/g, "''");
     const base = "https://graph.microsoft.com/beta/auditLogs/signIns";
-
-    const userUrl = base +
-      "?$filter=appId eq '" + safeId + "'" +
-      "&$orderby=createdDateTime desc&$top=1" +
-      "&$select=createdDateTime,userDisplayName,userPrincipalName,ipAddress,clientAppUsed,resourceDisplayName,location,signInEventTypes";
-
-    const spUrl = base +
-      "?$filter=appId eq '" + safeId + "' and signInEventTypes/any(t: t eq 'servicePrincipal')" +
-      "&$orderby=createdDateTime desc&$top=1" +
-      "&$select=createdDateTime,servicePrincipalName,servicePrincipalId,ipAddress,resourceDisplayName,signInEventTypes";
-
+    const userUrl = base + "?$filter=appId eq '" + safeId + "'&$orderby=createdDateTime desc&$top=1&$select=createdDateTime,userDisplayName,userPrincipalName,ipAddress,clientAppUsed,resourceDisplayName,location,signInEventTypes";
+    const spUrl = base + "?$filter=appId eq '" + safeId + "' and signInEventTypes/any(t: t eq 'servicePrincipal')&$orderby=createdDateTime desc&$top=1&$select=createdDateTime,servicePrincipalName,servicePrincipalId,ipAddress,resourceDisplayName,signInEventTypes";
     const results = await Promise.allSettled([
       axios.get(userUrl, { headers: { Authorization: "Bearer " + token } }),
       axios.get(spUrl, { headers: { Authorization: "Bearer " + token } }),
     ]);
-
     const signIns = [];
     results.forEach(function(r) {
-      if (r.status === "fulfilled" && r.value.data.value) {
-        signIns.push.apply(signIns, r.value.data.value);
-      }
+      if (r.status === "fulfilled" && r.value.data.value) signIns.push.apply(signIns, r.value.data.value);
     });
-
-    signIns.sort(function(a, b) {
-      return new Date(b.createdDateTime) - new Date(a.createdDateTime);
-    });
-
+    signIns.sort(function(a, b) { return new Date(b.createdDateTime) - new Date(a.createdDateTime); });
     return signIns.length > 0 ? signIns.slice(0, 3) : null;
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { return null; }
 }
 
-// Service principal para descobrir onde o app e usado
 async function getServicePrincipalByAppId(appId, token) {
   try {
     const safeId = appId.replace(/'/g, "''");
-    const res = await graphGet(
-      "/servicePrincipals?$filter=appId eq '" + safeId + "'&$select=displayName,appId,id,servicePrincipalType,accountEnabled,publisherName,homepage,replyUrls",
-      token
-    );
+    const res = await graphGet("/servicePrincipals?$filter=appId eq '" + safeId + "'&$select=displayName,appId,id,servicePrincipalType,accountEnabled,publisherName,homepage,replyUrls", token);
     return res.value && res.value.length > 0 ? res.value[0] : null;
   } catch (e) { return null; }
 }
@@ -146,33 +124,25 @@ function resolveActor(log) {
     if (!name && u.id) name = "Usuario (" + u.id.substring(0, 8) + "...)";
     return name || "Usuario desconhecido";
   }
-  if (ib.app) {
-    return "__SYSTEM__:" + (ib.app.displayName || ib.app.appId || "Sistema");
-  }
+  if (ib.app) return "__SYSTEM__:" + (ib.app.displayName || ib.app.appId || "Sistema");
   return "__SYSTEM__:Azure AD";
 }
 
-function isHumanActor(actor) {
-  return actor && !actor.startsWith("__SYSTEM__:");
-}
-
+function isHumanActor(actor) { return actor && !actor.startsWith("__SYSTEM__:"); }
 function formatActor(actor) {
   if (!actor) return null;
   if (actor.startsWith("__SYSTEM__:")) return null;
   return actor;
 }
 
-// Permissoes de escrita
 function analyzeWritePermissions(app) {
   const allPerms = [].concat(app.appRoles || []).concat(app.delegated || []);
   return allPerms.filter(function(p) {
     const n = (p.name || "").toLowerCase();
-    return n.includes("write") || n.includes("readwrite") || n.includes("manage") ||
-      n.includes("send") || n.includes("full_access_as_app");
+    return n.includes("write") || n.includes("readwrite") || n.includes("manage") || n.includes("send") || n.includes("full_access_as_app");
   });
 }
 
-// Categorias de write — usado para filtros por tipo
 function getWriteCategories(a) {
   const writePerms = a._writePermissions || [];
   const categories = [];
@@ -191,7 +161,6 @@ function getWriteCategories(a) {
   return categories;
 }
 
-// Workloads inferidos pelas permissoes — onde o app provavelmente e usado
 function buildUsageAnalysis(app) {
   const allPerms = [].concat(app.appRoles || []).concat(app.delegated || []);
   const workloads = [];
@@ -211,9 +180,7 @@ function buildUsageAnalysis(app) {
 
 function calculateRisk(app) {
   const perms = analyzeWritePermissions(app);
-  const criticalPerms = ["Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory",
-    "Application.ReadWrite.All", "full_access_as_app", "Mail.ReadWrite",
-    "Files.ReadWrite.All", "Group.ReadWrite.All", "User.ReadWrite.All"];
+  const criticalPerms = ["Directory.ReadWrite.All","RoleManagement.ReadWrite.Directory","Application.ReadWrite.All","full_access_as_app","Mail.ReadWrite","Files.ReadWrite.All","Group.ReadWrite.All","User.ReadWrite.All"];
   let score = 0;
   perms.forEach(function(p) {
     if (criticalPerms.some(function(c) { return (p.name || "").includes(c); })) score += 40;
@@ -264,22 +231,12 @@ async function collectApps(token) {
   for (var log of auditLogs) {
     var actor = resolveActor(log);
     for (var target of (log.targetResources || [])) {
-      var entry = {
-        action: log.activityDisplayName,
-        timestamp: log.activityDateTime,
-        actor: actor,
-        isHuman: isHumanActor(actor),
-        result: log.result,
-        targetName: target.displayName,
-        modifiedProps: target.modifiedProperties || [],
-      };
+      var entry = { action: log.activityDisplayName, timestamp: log.activityDateTime, actor: actor, isHuman: isHumanActor(actor), result: log.result, targetName: target.displayName, modifiedProps: target.modifiedProperties || [] };
       addToMap(target.id, entry);
       if (target.displayName) addToMap(target.displayName, entry);
       if (target.modifiedProperties) {
         for (var prop of target.modifiedProperties) {
-          if (prop.displayName === "AppId" && prop.newValue) {
-            addToMap(prop.newValue.replace(/"/g, "").trim(), entry);
-          }
+          if (prop.displayName === "AppId" && prop.newValue) addToMap(prop.newValue.replace(/"/g, "").trim(), entry);
         }
       }
     }
@@ -291,7 +248,6 @@ async function collectApps(token) {
 
   for (var i = 0; i < apps.length; i += chunkSize) {
     var chunk = apps.slice(i, i + chunkSize);
-
     var [ownersChunk, signInsChunk, spChunk] = await Promise.all([
       Promise.all(chunk.map(function(a) { return getAppOwners(a.id, token); })),
       Promise.all(chunk.map(function(a) { return getLastSignIn(a.appId, token); })),
@@ -303,35 +259,18 @@ async function collectApps(token) {
       chunk[j]._lastSignIn = signInsChunk[j];
       chunk[j]._servicePrincipal = spChunk[j];
 
-      var appLogs = []
-        .concat(auditMap[chunk[j].id] || [])
-        .concat(auditMap[chunk[j].appId] || [])
-        .concat(auditMap[chunk[j].displayName] || []);
-
+      var appLogs = [].concat(auditMap[chunk[j].id] || []).concat(auditMap[chunk[j].appId] || []).concat(auditMap[chunk[j].displayName] || []);
       var seen = {};
-      appLogs = appLogs.filter(function(l) {
-        var key = l.timestamp + l.action;
-        if (seen[key]) return false;
-        seen[key] = true;
-        return true;
-      });
+      appLogs = appLogs.filter(function(l) { var key = l.timestamp + l.action; if (seen[key]) return false; seen[key] = true; return true; });
       appLogs.sort(function(a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
       chunk[j]._auditLogs = appLogs;
 
       var createActions = ["add application", "add service principal"];
-      var createLog = appLogs.find(function(l) {
-        return l.isHuman && l.action && createActions.some(function(a) { return l.action.toLowerCase().includes(a); });
-      });
-      if (!createLog) {
-        createLog = appLogs.find(function(l) {
-          return l.action && createActions.some(function(a) { return l.action.toLowerCase().includes(a); });
-        });
-      }
+      var createLog = appLogs.find(function(l) { return l.isHuman && l.action && createActions.some(function(a) { return l.action.toLowerCase().includes(a); }); });
+      if (!createLog) createLog = appLogs.find(function(l) { return l.action && createActions.some(function(a) { return l.action.toLowerCase().includes(a); }); });
       if (!createLog) {
         var humanLogs = appLogs.filter(function(l) { return l.isHuman; });
-        if (humanLogs.length > 0) {
-          createLog = humanLogs.slice().sort(function(a, b) { return new Date(a.timestamp) - new Date(b.timestamp); })[0];
-        }
+        if (humanLogs.length > 0) createLog = humanLogs.slice().sort(function(a, b) { return new Date(a.timestamp) - new Date(b.timestamp); })[0];
       }
 
       if (createLog) {
@@ -346,19 +285,16 @@ async function collectApps(token) {
   }
 
   var result = appsEnriched.map(function(application) {
-    var appRoles = [];
-    var delegated = [];
+    var appRoles = [], delegated = [];
     if (application.requiredResourceAccess) {
       for (var resource of application.requiredResourceAccess) {
         var resourceSp = spMap[resource.resourceAppId];
         for (var access of resource.resourceAccess) {
           if (access.type === "Role") {
-            var roleDef = resourceSp && resourceSp.appRoles
-              ? resourceSp.appRoles.find(function(r) { return r.id === access.id; }) : null;
+            var roleDef = resourceSp && resourceSp.appRoles ? resourceSp.appRoles.find(function(r) { return r.id === access.id; }) : null;
             appRoles.push({ id: access.id, name: roleDef ? roleDef.value : null, description: roleDef ? roleDef.displayName : null, resource: resourceSp ? resourceSp.displayName : resource.resourceAppId });
           } else {
-            var scopeDef = resourceSp && resourceSp.oauth2PermissionScopes
-              ? resourceSp.oauth2PermissionScopes.find(function(s) { return s.id === access.id; }) : null;
+            var scopeDef = resourceSp && resourceSp.oauth2PermissionScopes ? resourceSp.oauth2PermissionScopes.find(function(s) { return s.id === access.id; }) : null;
             delegated.push({ id: access.id, name: scopeDef ? scopeDef.value : null, description: scopeDef ? scopeDef.adminConsentDisplayName : null, resource: resourceSp ? resourceSp.displayName : resource.resourceAppId });
           }
         }
@@ -385,63 +321,41 @@ async function collectApps(token) {
 
 // ─── Detecta mudancas ─────────────────────────────────────────────────────────
 function detectChanges(prevApps, currApps) {
-  var changes = [];
-  var prevMap = {}, currMap = {};
+  var changes = [], prevMap = {}, currMap = {};
   for (var a of prevApps) prevMap[a.appId] = a;
   for (var a of currApps) currMap[a.appId] = a;
 
   for (var appId in currMap) {
     if (!prevMap[appId]) {
       var a = currMap[appId];
-      var createdBy = a._createdBy ? " por " + a._createdBy : "";
-      changes.push({ type: "novo", severity: "aviso", appId, appName: a.displayName || appId, message: "Nova aplicacao: " + (a.displayName || appId) + createdBy, permChanges: [] });
+      changes.push({ type: "novo", severity: "aviso", appId, appName: a.displayName || appId, message: "Nova aplicacao: " + (a.displayName || appId) + (a._createdBy ? " por " + a._createdBy : ""), permChanges: [] });
     }
   }
   for (var appId in prevMap) {
-    if (!currMap[appId]) {
-      changes.push({ type: "removido", severity: "info", appId, appName: prevMap[appId].displayName || appId, message: "Aplicacao removida: " + (prevMap[appId].displayName || appId), permChanges: [] });
-    }
+    if (!currMap[appId]) changes.push({ type: "removido", severity: "info", appId, appName: prevMap[appId].displayName || appId, message: "Aplicacao removida: " + (prevMap[appId].displayName || appId), permChanges: [] });
   }
   for (var appId in currMap) {
     if (!prevMap[appId]) continue;
-    var prev = prevMap[appId], curr = currMap[appId];
-    var permChanges = [];
+    var prev = prevMap[appId], curr = currMap[appId], permChanges = [];
 
     var prevRoles = (prev.appRoles || []).map(function(r) { return r.id; });
     var currRoles = (curr.appRoles || []).map(function(r) { return r.id; });
-    for (var id of currRoles.filter(function(id) { return !prevRoles.includes(id); })) {
-      var p = (curr.appRoles || []).find(function(r) { return r.id === id; });
-      permChanges.push({ action: "adicionada", type: "APP", name: p ? (p.name || id) : id, severity: "critico" });
-    }
-    for (var id of prevRoles.filter(function(id) { return !currRoles.includes(id); })) {
-      var p = (prev.appRoles || []).find(function(r) { return r.id === id; });
-      permChanges.push({ action: "removida", type: "APP", name: p ? (p.name || id) : id, severity: "melhora" });
-    }
+    for (var id of currRoles.filter(function(id) { return !prevRoles.includes(id); })) { var p = (curr.appRoles || []).find(function(r) { return r.id === id; }); permChanges.push({ action: "adicionada", type: "APP", name: p ? (p.name || id) : id, severity: "critico" }); }
+    for (var id of prevRoles.filter(function(id) { return !currRoles.includes(id); })) { var p = (prev.appRoles || []).find(function(r) { return r.id === id; }); permChanges.push({ action: "removida", type: "APP", name: p ? (p.name || id) : id, severity: "melhora" }); }
 
     var prevDel = (prev.delegated || []).map(function(r) { return r.id; });
     var currDel = (curr.delegated || []).map(function(r) { return r.id; });
-    for (var id of currDel.filter(function(id) { return !prevDel.includes(id); })) {
-      var p = (curr.delegated || []).find(function(r) { return r.id === id; });
-      permChanges.push({ action: "adicionada", type: "DEL", name: p ? (p.name || id) : id, severity: "aviso" });
-    }
-    for (var id of prevDel.filter(function(id) { return !currDel.includes(id); })) {
-      var p = (prev.delegated || []).find(function(r) { return r.id === id; });
-      permChanges.push({ action: "removida", type: "DEL", name: p ? (p.name || id) : id, severity: "melhora" });
-    }
+    for (var id of currDel.filter(function(id) { return !prevDel.includes(id); })) { var p = (curr.delegated || []).find(function(r) { return r.id === id; }); permChanges.push({ action: "adicionada", type: "DEL", name: p ? (p.name || id) : id, severity: "aviso" }); }
+    for (var id of prevDel.filter(function(id) { return !currDel.includes(id); })) { var p = (prev.delegated || []).find(function(r) { return r.id === id; }); permChanges.push({ action: "removida", type: "DEL", name: p ? (p.name || id) : id, severity: "melhora" }); }
 
-    var prevSecrets = (prev.secrets || []).length;
-    var currSecrets = (curr.secrets || []).length;
+    var prevSecrets = (prev.secrets || []).length, currSecrets = (curr.secrets || []).length;
     if (currSecrets > prevSecrets) permChanges.push({ action: "adicionada", type: "SECRET", name: "Nova secret", severity: "aviso" });
     if (currSecrets < prevSecrets) permChanges.push({ action: "removida", type: "SECRET", name: "Secret removida", severity: "info" });
 
     if (permChanges.length > 0) {
-      var worst = permChanges.some(function(c) { return c.severity === "critico"; }) ? "critico"
-        : permChanges.some(function(c) { return c.severity === "aviso"; }) ? "aviso" : "melhora";
-      var recentLog = (curr._auditLogs || [])
-        .filter(function(l) { return (Date.now() - new Date(l.timestamp).getTime()) < 3600000; })
-        .sort(function(a, b) { return new Date(b.timestamp) - new Date(a.timestamp); })[0];
-      var changedBy = recentLog && recentLog.isHuman ? " por " + recentLog.actor : "";
-      changes.push({ type: "permissao", severity: worst, appId, appName: curr.displayName || appId, message: (curr.displayName || appId) + ": " + permChanges.length + " alteracao(es)" + changedBy, permChanges });
+      var worst = permChanges.some(function(c) { return c.severity === "critico"; }) ? "critico" : permChanges.some(function(c) { return c.severity === "aviso"; }) ? "aviso" : "melhora";
+      var recentLog = (curr._auditLogs || []).filter(function(l) { return (Date.now() - new Date(l.timestamp).getTime()) < 3600000; }).sort(function(a, b) { return new Date(b.timestamp) - new Date(a.timestamp); })[0];
+      changes.push({ type: "permissao", severity: worst, appId, appName: curr.displayName || appId, message: (curr.displayName || appId) + ": " + permChanges.length + " alteracao(es)" + (recentLog && recentLog.isHuman ? " por " + recentLog.actor : ""), permChanges });
     }
   }
   return changes;
@@ -449,26 +363,24 @@ function detectChanges(prevApps, currApps) {
 
 function classifyPerm(name) {
   if (!name) return "normal";
-  var critical = ["Mail.ReadWrite", "Mail.Send", "Files.ReadWrite.All", "Directory.ReadWrite.All", "User.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "Application.ReadWrite.All", "Group.ReadWrite.All", "full_access_as_app"];
-  var high = ["Mail.Read", "Files.Read.All", "User.Read.All", "Directory.Read.All", "AuditLog.Read.All", "Policy.Read.All", "IdentityRiskyUser.Read.All"];
+  var critical = ["Mail.ReadWrite","Mail.Send","Files.ReadWrite.All","Directory.ReadWrite.All","User.ReadWrite.All","RoleManagement.ReadWrite.Directory","Application.ReadWrite.All","Group.ReadWrite.All","full_access_as_app"];
+  var high = ["Mail.Read","Files.Read.All","User.Read.All","Directory.Read.All","AuditLog.Read.All","Policy.Read.All","IdentityRiskyUser.Read.All"];
   if (critical.some(function(c) { return name.includes(c); })) return "critico";
   if (high.some(function(h) { return name.includes(h); })) return "alto";
   return "normal";
 }
 
 function permLabel(p) { return p.name || "[" + p.id.substring(0, 8) + "...]"; }
-function fmtDate(d) { if (!d) return "—"; return new Date(d).toLocaleString("pt-BR"); }
-function fmtDateOnly(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("pt-BR"); }
+function fmtDate(d) { if (!d) return ""; return new Date(d).toLocaleString("pt-BR"); }
+function fmtDateOnly(d) { if (!d) return ""; return new Date(d).toLocaleDateString("pt-BR"); }
 
-// Formata ultimo uso de forma compacta para a tabela
 function fmtLastUsed(signIns) {
   if (!signIns || signIns.length === 0) return { text: "Nunca", color: "#3a5068", full: "Nenhum sign-in detectado" };
   var last = signIns[0];
   var days = Math.floor((Date.now() - new Date(last.createdDateTime).getTime()) / 86400000);
   var color = days > 90 ? "#ef4444" : days > 30 ? "#f59e0b" : "#4ade80";
   var text = days === 0 ? "Hoje" : days === 1 ? "Ontem" : days + "d atras";
-  var full = fmtDate(last.createdDateTime);
-  return { text, color, full };
+  return { text, color, full: fmtDate(last.createdDateTime) };
 }
 
 // ─── Rotas ────────────────────────────────────────────────────────────────────
@@ -498,8 +410,7 @@ app.get("/progress/:sessionId", function(req, res) {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
   function send(d) { res.write("data: " + JSON.stringify(d) + "\n\n"); }
-  runCollection(sessionId, send).then(function() { send({ type: "done" }); res.end(); })
-    .catch(function(err) { send({ type: "error", message: err.message }); res.end(); });
+  runCollection(sessionId, send).then(function() { send({ type: "done" }); res.end(); }).catch(function(err) { send({ type: "error", message: err.message }); res.end(); });
 });
 
 async function runCollection(sessionId, send) {
@@ -520,9 +431,7 @@ async function runCollection(sessionId, send) {
   var newChanges = session.lastApps ? detectChanges(session.lastApps, apps) : [];
   var now = Date.now();
   var stamped = newChanges.map(function(c) { return Object.assign({}, c, { detectedAt: new Date().toISOString() }); });
-  session.changesLast24h = session.changesLast24h
-    .filter(function(c) { return (now - new Date(c.detectedAt).getTime()) < 24 * 60 * 60 * 1000; })
-    .concat(stamped);
+  session.changesLast24h = session.changesLast24h.filter(function(c) { return (now - new Date(c.detectedAt).getTime()) < 24 * 60 * 60 * 1000; }).concat(stamped);
   send({ type: "step", status: "done", label: newChanges.length + " mudanca(s) | " + session.changesLast24h.length + " nas ultimas 24h" });
   session.snapshots.push({ timestamp: new Date().toISOString(), count: apps.length });
   if (session.snapshots.length > 50) session.snapshots.shift();
@@ -541,17 +450,13 @@ app.get("/refresh/:sessionId", async function(req, res) {
     var newChanges = session.lastApps ? detectChanges(session.lastApps, apps) : [];
     var now = Date.now();
     var stamped = newChanges.map(function(c) { return Object.assign({}, c, { detectedAt: new Date().toISOString() }); });
-    session.changesLast24h = session.changesLast24h
-      .filter(function(c) { return (now - new Date(c.detectedAt).getTime()) < 24 * 60 * 60 * 1000; })
-      .concat(stamped);
+    session.changesLast24h = session.changesLast24h.filter(function(c) { return (now - new Date(c.detectedAt).getTime()) < 24 * 60 * 60 * 1000; }).concat(stamped);
     session.snapshots.push({ timestamp: new Date().toISOString(), count: apps.length });
     if (session.snapshots.length > 50) session.snapshots.shift();
     session.lastApps = apps;
     session.lastUpdated = new Date();
     res.json({ apps, changesLast24h: session.changesLast24h, newChanges, snapshots: session.snapshots, updatedAt: session.lastUpdated });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get("/dashboard/:sessionId", function(req, res) {
@@ -563,26 +468,9 @@ app.get("/dashboard/:sessionId", function(req, res) {
 // ─── Loading Page ─────────────────────────────────────────────────────────────
 function buildLoadingPage(sessionId, tenantId) {
   return '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Carregando...</title>' +
-    '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:"SF Mono",Monaco,monospace;background:#060a0f;color:#c8d8e8;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}' +
-    '.card{background:#0d1520;border:1px solid #1a2840;border-radius:16px;padding:48px 40px;max-width:580px;width:100%}' +
-    'h1{font-size:18px;color:#4fc3f7;margin-bottom:4px;letter-spacing:2px;text-transform:uppercase}' +
-    '.tid{font-size:11px;color:#3a5068;margin-bottom:32px}.bar-wrap{height:2px;background:#0a1525;border-radius:2px;margin-bottom:32px}' +
-    '.bar{height:100%;background:linear-gradient(90deg,#0ea5e9,#38bdf8,#7dd3fc);border-radius:2px;width:0%;transition:width .8s}' +
-    '.steps{display:flex;flex-direction:column;gap:6px}' +
-    '.step{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:#060d16;font-size:12px;color:#3a5068;border:1px solid transparent;transition:all .4s}' +
-    '.step.running{background:#061828;border-color:#0ea5e9;color:#7dd3fc}.step.done{background:#061a10;border-color:#22c55e40;color:#4ade80}.step.error{background:#1a0606;border-color:#ef444440;color:#f87171}' +
-    '.icon{width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px}' +
-    '.spinner{width:12px;height:12px;border:1.5px solid #1a3050;border-top-color:#0ea5e9;border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}' +
-    '.reveal{text-align:center;margin-top:36px;display:none}.big{font-size:64px;font-weight:700;color:#0ea5e9;letter-spacing:-2px}.sub{font-size:12px;color:#3a5068;margin-top:4px;letter-spacing:2px;text-transform:uppercase}' +
-    '.btn{display:inline-block;margin-top:24px;padding:12px 32px;background:linear-gradient(135deg,#0369a1,#0ea5e9);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;text-transform:uppercase}' +
-    '</style></head><body>' +
-    '<div class="card"><h1>ENTERPRISE APPLICATIONS MONITOR</h1><div class="tid">' + tenantId + '</div>' +
-    '<div class="bar-wrap"><div class="bar" id="bar"></div></div>' +
-    '<div class="steps" id="steps"></div>' +
-    '<div class="reveal" id="reveal"><div class="big">✓</div><div class="sub">analise concluida</div><a class="btn" id="btn" href="#">ABRIR MONITOR</a></div></div>' +
-    '<script>var total=5,done=0,active=null;var stepsEl=document.getElementById("steps"),bar=document.getElementById("bar");' +
-    'var es=new EventSource("/progress/' + sessionId + '");' +
-    'es.onmessage=function(e){var d=JSON.parse(e.data);if(d.type==="step"){if(d.status==="running"){if(active){active.className="step done";active.querySelector(".icon").innerHTML="&#10003;";done++;bar.style.width=Math.min(92,Math.round(done/total*100))+"%";}var el=document.createElement("div");el.className="step running";el.innerHTML="<div class=\'icon\'><div class=\'spinner\'></div></div><span>"+d.label+"</span>";stepsEl.appendChild(el);el.scrollIntoView({behavior:"smooth"});active=el;}else if(d.status==="done"&&active){active.querySelector("span").textContent=d.label;}}if(d.type==="done"){if(active){active.className="step done";active.querySelector(".icon").innerHTML="&#10003;";}bar.style.width="100%";es.close();document.getElementById("btn").href="/dashboard/' + sessionId + '";document.getElementById("reveal").style.display="block";}if(d.type==="error"){if(active){active.className="step error";active.querySelector(".icon").innerHTML="&#10007;";}var err=document.createElement("div");err.className="step error";err.innerHTML="<div class=\'icon\'>&#10007;</div><span>Erro: "+d.message+"</span>";stepsEl.appendChild(err);es.close();}};' +
+    '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:"SF Mono",Monaco,monospace;background:#060a0f;color:#c8d8e8;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#0d1520;border:1px solid #1a2840;border-radius:16px;padding:48px 40px;max-width:580px;width:100%}h1{font-size:18px;color:#4fc3f7;margin-bottom:4px;letter-spacing:2px;text-transform:uppercase}.tid{font-size:11px;color:#3a5068;margin-bottom:32px}.bar-wrap{height:2px;background:#0a1525;border-radius:2px;margin-bottom:32px}.bar{height:100%;background:linear-gradient(90deg,#0ea5e9,#38bdf8,#7dd3fc);border-radius:2px;width:0%;transition:width .8s}.steps{display:flex;flex-direction:column;gap:6px}.step{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:#060d16;font-size:12px;color:#3a5068;border:1px solid transparent;transition:all .4s}.step.running{background:#061828;border-color:#0ea5e9;color:#7dd3fc}.step.done{background:#061a10;border-color:#22c55e40;color:#4ade80}.step.error{background:#1a0606;border-color:#ef444440;color:#f87171}.icon{width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px}.spinner{width:12px;height:12px;border:1.5px solid #1a3050;border-top-color:#0ea5e9;border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.reveal{text-align:center;margin-top:36px;display:none}.big{font-size:64px;font-weight:700;color:#0ea5e9;letter-spacing:-2px}.sub{font-size:12px;color:#3a5068;margin-top:4px;letter-spacing:2px;text-transform:uppercase}.btn{display:inline-block;margin-top:24px;padding:12px 32px;background:linear-gradient(135deg,#0369a1,#0ea5e9);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;text-transform:uppercase}</style></head><body>' +
+    '<div class="card"><h1>ENTERPRISE APPLICATIONS MONITOR</h1><div class="tid">' + tenantId + '</div><div class="bar-wrap"><div class="bar" id="bar"></div></div><div class="steps" id="steps"></div><div class="reveal" id="reveal"><div class="big">&#10003;</div><div class="sub">analise concluida</div><a class="btn" id="btn" href="#">ABRIR MONITOR</a></div></div>' +
+    '<script>var total=5,done=0,active=null;var stepsEl=document.getElementById("steps"),bar=document.getElementById("bar");var es=new EventSource("/progress/' + sessionId + '");es.onmessage=function(e){var d=JSON.parse(e.data);if(d.type==="step"){if(d.status==="running"){if(active){active.className="step done";active.querySelector(".icon").innerHTML="&#10003;";done++;bar.style.width=Math.min(92,Math.round(done/total*100))+"%";}var el=document.createElement("div");el.className="step running";el.innerHTML="<div class=\'icon\'><div class=\'spinner\'></div></div><span>"+d.label+"</span>";stepsEl.appendChild(el);el.scrollIntoView({behavior:"smooth"});active=el;}else if(d.status==="done"&&active){active.querySelector("span").textContent=d.label;}}if(d.type==="done"){if(active){active.className="step done";active.querySelector(".icon").innerHTML="&#10003;";}bar.style.width="100%";es.close();document.getElementById("btn").href="/dashboard/' + sessionId + '";document.getElementById("reveal").style.display="block";}if(d.type==="error"){if(active){active.className="step error";active.querySelector(".icon").innerHTML="&#10007;";}var err=document.createElement("div");err.className="step error";err.innerHTML="<div class=\'icon\'>&#10007;</div><span>Erro: "+d.message+"</span>";stepsEl.appendChild(err);es.close();}};' +
     '</script></body></html>';
 }
 
@@ -592,7 +480,6 @@ function buildDashboard(session, sessionId) {
   var changes24h = session.changesLast24h || [];
   var riskColor = { critico: "#ef4444", alto: "#f59e0b", normal: "#4ade80" };
 
-  // ── Grupos para abas ─────────────────────────────────────────────────────
   var allApps         = apps;
   var riskyApps       = apps.filter(function(a) { return a.appRoles && a.appRoles.length > 0; });
   var writeApps       = apps.filter(function(a) { return a._writePermissions && a._writePermissions.length > 0; });
@@ -606,76 +493,50 @@ function buildDashboard(session, sessionId) {
   var expSecrets      = apps.filter(function(a) { return (a.secrets || []).some(function(s) { return s.status === "expirada" || s.status === "expirando"; }); });
   var criticalApps    = apps.filter(function(a) { return a._riskLevel === "Critical"; });
 
-  // ── Tooltips de risco por permissao ───────────────────────────────────────
+  // Serializa todos os grupos de apps como JSON para uso no cliente
+  var appDatasets = {
+    all:         allApps,
+    risky:       riskyApps,
+    write:       writeApps,
+    writegroups: writeGroupsApps,
+    writeusers:  writeUsersApps,
+    writeemail:  writeEmailApps,
+    writefiles:  writeFilesApps,
+    critical:    criticalApps,
+    recent:      recentApps,
+    noowner:     noOwnerApps,
+    secrets:     appsWithSecrets,
+    expsecrets:  expSecrets,
+  };
+
+  // Tooltips
   var RISK_TOOLTIPS = {
-    "Mail.ReadWrite": "CRITICO — Le e modifica todos os e-mails da org.",
-    "Mail.Send": "CRITICO — Envia e-mails como qualquer usuario. Risco de phishing interno.",
-    "Files.ReadWrite.All": "CRITICO — Le e escreve em todos os arquivos SharePoint/OneDrive.",
-    "Directory.ReadWrite.All": "CRITICO — Le e modifica todo o diretorio Azure AD.",
-    "User.ReadWrite.All": "CRITICO — Cria, edita e deleta qualquer usuario do tenant.",
-    "RoleManagement.ReadWrite.Directory": "CRITICO — Atribui e remove roles de administrador.",
-    "Application.ReadWrite.All": "CRITICO — Cria e modifica qualquer aplicacao, incluindo secrets.",
-    "Group.ReadWrite.All": "CRITICO — Cria e modifica todos os grupos, incluindo grupos de seguranca.",
-    "full_access_as_app": "CRITICO — Acesso total ao Exchange Online como aplicacao.",
-    "Mail.Read": "ALTO — Le todos os e-mails de todos os usuarios.",
-    "Files.Read.All": "ALTO — Le todos os arquivos de todos os usuarios.",
-    "User.Read.All": "ALTO — Le dados de todos os usuarios: nomes, e-mails, cargos.",
-    "Directory.Read.All": "ALTO — Le todo o diretorio AD: usuarios, grupos, roles.",
-    "AuditLog.Read.All": "ALTO — Acessa os logs de auditoria do tenant.",
-    "Policy.Read.All": "ALTO — Le todas as politicas de seguranca e acesso condicional.",
-    "IdentityRiskyUser.Read.All": "ALTO — Le dados de usuarios sinalizados como risco.",
-    "User.Read": "NORMAL — Le apenas o perfil do usuario que autorizou.",
-    "openid": "NORMAL — Permite login com conta Microsoft.",
-    "profile": "NORMAL — Le nome, foto e info basica do usuario logado.",
-    "email": "NORMAL — Le o e-mail do usuario logado.",
-    "offline_access": "NORMAL — Permite funcionar em segundo plano (refresh token).",
-    "Calendars.Read": "NORMAL — Le eventos de calendario do usuario logado.",
-    "Calendars.ReadWrite": "MEDIO — Le e cria eventos no calendario do usuario logado.",
-    "Tasks.ReadWrite": "NORMAL — Le e cria tarefas no Planner/To Do.",
+    "Mail.ReadWrite":"CRITICO — Le e modifica todos os e-mails da org.","Mail.Send":"CRITICO — Envia e-mails como qualquer usuario.","Files.ReadWrite.All":"CRITICO — Le e escreve em todos os arquivos SharePoint/OneDrive.","Directory.ReadWrite.All":"CRITICO — Le e modifica todo o diretorio Azure AD.","User.ReadWrite.All":"CRITICO — Cria, edita e deleta qualquer usuario.","RoleManagement.ReadWrite.Directory":"CRITICO — Atribui e remove roles de administrador.","Application.ReadWrite.All":"CRITICO — Cria e modifica qualquer aplicacao, incluindo secrets.","Group.ReadWrite.All":"CRITICO — Cria e modifica todos os grupos.","full_access_as_app":"CRITICO — Acesso total ao Exchange Online como aplicacao.","Mail.Read":"ALTO — Le todos os e-mails de todos os usuarios.","Files.Read.All":"ALTO — Le todos os arquivos de todos os usuarios.","User.Read.All":"ALTO — Le dados de todos os usuarios.","Directory.Read.All":"ALTO — Le todo o diretorio AD.","AuditLog.Read.All":"ALTO — Acessa os logs de auditoria do tenant.","Policy.Read.All":"ALTO — Le todas as politicas de seguranca.","IdentityRiskyUser.Read.All":"ALTO — Le dados de usuarios sinalizados como risco.","User.Read":"NORMAL — Le apenas o perfil do usuario que autorizou.","openid":"NORMAL — Permite login com conta Microsoft.","profile":"NORMAL — Le nome, foto e info basica do usuario logado.","email":"NORMAL — Le o e-mail do usuario logado.","offline_access":"NORMAL — Permite funcionar em segundo plano.","Calendars.Read":"NORMAL — Le eventos de calendario do usuario logado.","Calendars.ReadWrite":"MEDIO — Le e cria eventos no calendario.","Tasks.ReadWrite":"NORMAL — Le e cria tarefas no Planner/To Do.",
   };
 
   function getPermTooltip(name, description, risk) {
     if (!name) return description || "Permissao nao identificada";
-    for (var key in RISK_TOOLTIPS) {
-      if (name === key || name.startsWith(key)) return RISK_TOOLTIPS[key];
-    }
-    var riskLabel = risk === "critico" ? "CRITICO" : risk === "alto" ? "ALTO" : "NORMAL";
-    return riskLabel + " — " + (description || name);
+    for (var key in RISK_TOOLTIPS) { if (name === key || name.startsWith(key)) return RISK_TOOLTIPS[key]; }
+    return (risk === "critico" ? "CRITICO" : risk === "alto" ? "ALTO" : "NORMAL") + " — " + (description || name);
   }
 
-  // ── Sugestoes ──────────────────────────────────────────────────────────────
   function getSuggestions(a) {
     var name = (a.displayName || "").toLowerCase();
     var currentNames = (a.appRoles || []).concat(a.delegated || []).map(function(p) { return p.name || ""; });
     var suggestions = { add: [], remove: [] };
-    var dangerous = ["Directory.ReadWrite.All", "User.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "Application.ReadWrite.All", "full_access_as_app"];
-    dangerous.forEach(function(perm) {
-      if (currentNames.some(function(n) { return n === perm; })) {
-        suggestions.remove.push({ name: perm, reason: "Permissao de escrita critica. Considere substituir pela versao Read-only." });
-      }
+    ["Directory.ReadWrite.All","User.ReadWrite.All","RoleManagement.ReadWrite.Directory","Application.ReadWrite.All","full_access_as_app"].forEach(function(perm) {
+      if (currentNames.some(function(n) { return n === perm; })) suggestions.remove.push({ name: perm, reason: "Permissao de escrita critica. Considere substituir pela versao Read-only." });
     });
-    if (name.includes("mail") || name.includes("email") || name.includes("outlook")) {
-      if (!currentNames.includes("Mail.Read")) suggestions.add.push({ name: "Mail.Read", reason: "Apps de e-mail geralmente precisam ler mensagens." });
-      if (currentNames.includes("Mail.ReadWrite")) suggestions.remove.push({ name: "Mail.ReadWrite", reason: "Use Mail.Read se o app apenas le e-mails." });
-    }
-    if (name.includes("user") || name.includes("people") || name.includes("directory")) {
-      if (!currentNames.includes("User.Read.All")) suggestions.add.push({ name: "User.Read.All", reason: "Apps de diretorio precisam desta permissao." });
-    }
-    if (name.includes("report") || name.includes("audit") || name.includes("monitor") || name.includes("security") || name.includes("scan")) {
-      if (!currentNames.includes("AuditLog.Read.All")) suggestions.add.push({ name: "AuditLog.Read.All", reason: "Apps de monitoramento precisam ler logs." });
-      if (!currentNames.includes("Directory.Read.All")) suggestions.add.push({ name: "Directory.Read.All", reason: "Apps de seguranca precisam ler o diretorio." });
-    }
-    if (name.includes("file") || name.includes("sharepoint") || name.includes("document")) {
-      if (!currentNames.includes("Files.Read.All")) suggestions.add.push({ name: "Files.Read.All", reason: "Apps de documentos precisam ler arquivos." });
-      if (currentNames.includes("Files.ReadWrite.All")) suggestions.remove.push({ name: "Files.ReadWrite.All", reason: "Use Files.Read.All se o app apenas le arquivos." });
-    }
-    if (currentNames.filter(function(n) { return n; }).length === 0) {
-      suggestions.add.push({ name: "User.Read", reason: "A maioria dos apps precisa ao menos desta permissao." });
-    }
+    if ((name.includes("mail")||name.includes("email")||name.includes("outlook"))&&!currentNames.includes("Mail.Read")) suggestions.add.push({ name:"Mail.Read", reason:"Apps de e-mail geralmente precisam ler mensagens." });
+    if ((name.includes("mail")||name.includes("email"))&&currentNames.includes("Mail.ReadWrite")) suggestions.remove.push({ name:"Mail.ReadWrite", reason:"Use Mail.Read se o app apenas le e-mails." });
+    if ((name.includes("user")||name.includes("people")||name.includes("directory"))&&!currentNames.includes("User.Read.All")) suggestions.add.push({ name:"User.Read.All", reason:"Apps de diretorio precisam desta permissao." });
+    if ((name.includes("report")||name.includes("audit")||name.includes("monitor")||name.includes("security")||name.includes("scan"))&&!currentNames.includes("AuditLog.Read.All")) suggestions.add.push({ name:"AuditLog.Read.All", reason:"Apps de monitoramento precisam ler logs." });
+    if ((name.includes("file")||name.includes("sharepoint")||name.includes("document"))&&!currentNames.includes("Files.Read.All")) suggestions.add.push({ name:"Files.Read.All", reason:"Apps de documentos precisam ler arquivos." });
+    if ((name.includes("file")||name.includes("sharepoint"))&&currentNames.includes("Files.ReadWrite.All")) suggestions.remove.push({ name:"Files.ReadWrite.All", reason:"Use Files.Read.All se o app apenas le arquivos." });
+    if (currentNames.filter(function(n) { return n; }).length === 0) suggestions.add.push({ name:"User.Read", reason:"A maioria dos apps precisa ao menos desta permissao." });
     return suggestions;
   }
 
-  // ── buildAppRow ────────────────────────────────────────────────────────────
   function buildAppRow(a, tabPrefix) {
     tabPrefix = tabPrefix || "all";
     var uid = (tabPrefix + "-" + a.appId).replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -683,49 +544,30 @@ function buildDashboard(session, sessionId) {
     var isRisky = a.appRoles && a.appRoles.length > 0;
     var writePerms = a._writePermissions || [];
     var writeCategories = getWriteCategories(a);
-
     var owners = (a._owners || []).map(function(o) { return escapeHtml(o.displayName || o.userPrincipalName || o.mail || "?"); });
     var ownersStr = owners.length > 0 ? owners.join(", ") : '<span style="color:#ef4444">Sem owner</span>';
-
-    var createdBy = a._createdBy
-      ? escapeHtml(a._createdBy)
-      : a._createdBySystem
-        ? '<span style="color:#3a5068;font-size:10px">via ' + escapeHtml(a._createdBySystem) + '</span>'
-        : '<span style="color:#2a4060;font-size:10px">Anterior a 30 dias</span>';
-
-    // Ultimo uso — formatado para tabela
+    var createdBy = a._createdBy ? escapeHtml(a._createdBy) : a._createdBySystem ? '<span style="color:#3a5068;font-size:10px">via ' + escapeHtml(a._createdBySystem) + '</span>' : '<span style="color:#2a4060;font-size:10px">Anterior a 30 dias</span>';
     var lastUsed = fmtLastUsed(a._lastSignIn);
     var lastUsedCell = '<span style="color:' + lastUsed.color + ';font-family:\'JetBrains Mono\',monospace;font-size:11px" title="' + escapeHtml(lastUsed.full) + '">' + lastUsed.text + '</span>';
-
     var riskBadgeColor = a._riskLevel === "Critical" ? "#ef4444" : a._riskLevel === "High" ? "#f59e0b" : a._riskLevel === "Medium" ? "#a78bfa" : "#4ade80";
-
     var notesHtml = a.notes ? '<div class="notes-box"><span class="notes-label">Notas:</span> ' + escapeHtml(a.notes) + '</div>' : "";
 
-    // Permissoes com tooltip
-    var permsHtml = allPerms.length === 0
-      ? '<span style="color:#3a5068;font-size:11px">Nenhuma permissao registrada</span>'
+    var permsHtml = allPerms.length === 0 ? '<span style="color:#3a5068;font-size:11px">Nenhuma permissao registrada</span>'
       : allPerms.map(function(p) {
           var risk = classifyPerm(p.name);
           var isApp = !!(a.appRoles || []).find(function(r) { return r.id === p.id; });
           var label = escapeHtml(permLabel(p));
           var tooltip = escapeHtml(getPermTooltip(p.name, p.description, risk));
           var isWrite = !!(p.name || "").toLowerCase().match(/write|send|manage|full_access/);
-          return '<div class="pb-wrap">' +
-            '<span class="pb" style="border-color:' + riskColor[risk] + ';color:' + riskColor[risk] + (isWrite ? ';font-weight:700' : '') + '">' +
-              '<span class="pt">' + (isApp ? "APP" : "DEL") + '</span> ' + label + (isWrite ? ' &#9999;' : '') +
-            '</span>' +
-            '<div class="pb-tooltip">' + tooltip + '</div>' +
-          '</div>';
+          return '<div class="pb-wrap"><span class="pb" style="border-color:' + riskColor[risk] + ';color:' + riskColor[risk] + (isWrite ? ';font-weight:700' : '') + '"><span class="pt">' + (isApp ? "APP" : "DEL") + '</span> ' + label + (isWrite ? ' &#9999;' : '') + '</span><div class="pb-tooltip">' + tooltip + '</div></div>';
         }).join("");
 
-    // Sugestoes
     var sugg = getSuggestions(a);
     var suggHtml = sugg.add.length === 0 && sugg.remove.length === 0
       ? '<div class="sugg-ok">Permissoes parecem adequadas para este app.</div>'
-      : (sugg.remove.length > 0 ? '<div class="sugg-section"><div class="sugg-title" style="color:#ef4444">Considere REMOVER:</div>' + sugg.remove.map(function(s) { return '<div class="sugg-item sugg-remove"><code>' + s.name + '</code><span>' + s.reason + '</span></div>'; }).join("") + '</div>' : "") +
-        (sugg.add.length > 0 ? '<div class="sugg-section"><div class="sugg-title" style="color:#4ade80">Considere ADICIONAR:</div>' + sugg.add.map(function(s) { return '<div class="sugg-item sugg-add"><code>' + s.name + '</code><span>' + s.reason + '</span></div>'; }).join("") + '</div>' : "");
+      : (sugg.remove.length > 0 ? '<div class="sugg-section"><div class="sugg-title" style="color:#ef4444">Considere REMOVER:</div>' + sugg.remove.map(function(s) { return '<div class="sugg-item sugg-remove"><code>' + s.name + '</code><span>' + s.reason + '</span></div>'; }).join("") + '</div>' : "")
+        + (sugg.add.length > 0 ? '<div class="sugg-section"><div class="sugg-title" style="color:#4ade80">Considere ADICIONAR:</div>' + sugg.add.map(function(s) { return '<div class="sugg-item sugg-add"><code>' + s.name + '</code><span>' + s.reason + '</span></div>'; }).join("") + '</div>' : "");
 
-    // Secrets
     var secretsHtml = (a.secrets && a.secrets.length > 0)
       ? '<div class="secrets-wrap">' + a.secrets.map(function(s) {
           var sc = s.status === "expirada" ? "#ef4444" : s.status === "expirando" ? "#f59e0b" : s.status === "sem-expiracao" ? "#94a3b8" : "#4ade80";
@@ -734,18 +576,15 @@ function buildDashboard(session, sessionId) {
         }).join("") + '</div>'
       : '<span style="color:#3a5068;font-size:12px">Nenhuma secret registrada</span>';
 
-    // Atividade
     var recentLogs = (a._auditLogs || []).slice(0, 5);
     var auditHtml = recentLogs.length > 0
-      ? '<div class="audit-wrap"><div class="audit-title">Atividade recente (ultimos 30 dias):</div>' +
-        recentLogs.map(function(l) {
+      ? '<div class="audit-wrap"><div class="audit-title">Atividade recente (ultimos 30 dias):</div>' + recentLogs.map(function(l) {
           var actorDisplay = l.isHuman ? escapeHtml(l.actor) : (formatActor(l.actor) || "Sistema");
           var actorColor = l.isHuman ? "#38bdf8" : "#3a5068";
           return '<div class="audit-item"><span class="audit-action">' + escapeHtml(l.action) + '</span><span class="audit-actor" style="color:' + actorColor + '">por ' + actorDisplay + '</span><span class="audit-time">' + fmtDate(l.timestamp) + '</span></div>';
         }).join("") + '</div>'
       : '<span style="color:#3a5068;font-size:12px">Nenhuma atividade nos ultimos 30 dias</span>';
 
-    // Ultimo Uso — detalhado
     var signIns = a._lastSignIn;
     var lastUsoHtml = "";
     if (signIns && signIns.length > 0) {
@@ -754,91 +593,20 @@ function buildDashboard(session, sessionId) {
       var stColor = daysAgo > 90 ? "#ef4444" : daysAgo > 30 ? "#f59e0b" : "#4ade80";
       var stLabel = daysAgo === 0 ? "Hoje" : daysAgo === 1 ? "Ontem" : daysAgo + " dias atras";
       var isSP = !!(last.signInEventTypes && last.signInEventTypes.some(function(t) { return t === "servicePrincipal"; }));
-      lastUsoHtml = '<div class="audit-wrap">' +
-        '<div class="audit-item"><span class="audit-action" style="color:#c8d8e8;font-weight:600">Ultimo uso detectado</span><span style="color:' + stColor + ';font-family:\'JetBrains Mono\',monospace;font-size:11px">' + stLabel + '</span></div>' +
-        '<div class="audit-item"><span class="audit-action">Data e hora exata</span><span class="audit-time">' + fmtDate(last.createdDateTime) + '</span></div>' +
-        '<div class="audit-item"><span class="audit-action">Tipo de acesso</span><span style="color:#a78bfa;font-size:11px">' + (isSP ? "Service Principal (automacao)" : "Sign-in de usuario") + '</span></div>' +
-        (last.userDisplayName || last.userPrincipalName ? '<div class="audit-item"><span class="audit-action">Usuario</span><span style="color:#38bdf8;font-size:11px">' + escapeHtml(last.userDisplayName || last.userPrincipalName) + '</span></div>' : '') +
-        (last.servicePrincipalName ? '<div class="audit-item"><span class="audit-action">Service Principal</span><span style="color:#a78bfa;font-size:11px">' + escapeHtml(last.servicePrincipalName) + '</span></div>' : '') +
-        '<div class="audit-item"><span class="audit-action">IP de origem</span><span style="color:#94a3b8;font-size:11px;font-family:monospace">' + escapeHtml(last.ipAddress || "N/A") + '</span></div>' +
-        (last.clientAppUsed ? '<div class="audit-item"><span class="audit-action">Cliente usado</span><span style="color:#94a3b8;font-size:11px">' + escapeHtml(last.clientAppUsed) + '</span></div>' : '') +
-        '<div class="audit-item"><span class="audit-action">Recurso acessado</span><span style="color:#94a3b8;font-size:11px">' + escapeHtml(last.resourceDisplayName || "N/A") + '</span></div>' +
-        (last.location ? '<div class="audit-item"><span class="audit-action">Localizacao</span><span style="color:#94a3b8;font-size:11px">' + escapeHtml((last.location.city || "") + (last.location.countryOrRegion ? ", " + last.location.countryOrRegion : "")) + '</span></div>' : '') +
-        (signIns.length > 1 ? '<div class="audit-title" style="margin-top:10px">Acessos anteriores:</div>' +
-          signIns.slice(1).map(function(si) {
-            var siSP = !!(si.signInEventTypes && si.signInEventTypes.some(function(t) { return t === "servicePrincipal"; }));
-            return '<div class="audit-item"><span class="audit-action">' + fmtDate(si.createdDateTime) + '</span><span style="color:#3a5068;font-size:10px">' + (siSP ? "SP" : escapeHtml(si.userDisplayName || si.userPrincipalName || "—")) + ' | ' + escapeHtml(si.ipAddress || "—") + '</span></div>';
-          }).join("") : '') +
-      '</div>';
+      lastUsoHtml = '<div class="audit-wrap"><div class="audit-item"><span class="audit-action" style="color:#c8d8e8;font-weight:600">Ultimo uso detectado</span><span style="color:' + stColor + ';font-family:\'JetBrains Mono\',monospace;font-size:11px">' + stLabel + '</span></div><div class="audit-item"><span class="audit-action">Data e hora exata</span><span class="audit-time">' + fmtDate(last.createdDateTime) + '</span></div><div class="audit-item"><span class="audit-action">Tipo de acesso</span><span style="color:#a78bfa;font-size:11px">' + (isSP ? "Service Principal (automacao)" : "Sign-in de usuario") + '</span></div>' + (last.userDisplayName || last.userPrincipalName ? '<div class="audit-item"><span class="audit-action">Usuario</span><span style="color:#38bdf8;font-size:11px">' + escapeHtml(last.userDisplayName || last.userPrincipalName) + '</span></div>' : '') + (last.servicePrincipalName ? '<div class="audit-item"><span class="audit-action">Service Principal</span><span style="color:#a78bfa;font-size:11px">' + escapeHtml(last.servicePrincipalName) + '</span></div>' : '') + '<div class="audit-item"><span class="audit-action">IP de origem</span><span style="color:#94a3b8;font-size:11px;font-family:monospace">' + escapeHtml(last.ipAddress || "N/A") + '</span></div>' + (last.clientAppUsed ? '<div class="audit-item"><span class="audit-action">Cliente usado</span><span style="color:#94a3b8;font-size:11px">' + escapeHtml(last.clientAppUsed) + '</span></div>' : '') + '<div class="audit-item"><span class="audit-action">Recurso acessado</span><span style="color:#94a3b8;font-size:11px">' + escapeHtml(last.resourceDisplayName || "N/A") + '</span></div>' + (last.location ? '<div class="audit-item"><span class="audit-action">Localizacao</span><span style="color:#94a3b8;font-size:11px">' + escapeHtml((last.location.city || "") + (last.location.countryOrRegion ? ", " + last.location.countryOrRegion : "")) + '</span></div>' : '') + (signIns.length > 1 ? '<div class="audit-title" style="margin-top:10px">Acessos anteriores:</div>' + signIns.slice(1).map(function(si) { var siSP = !!(si.signInEventTypes && si.signInEventTypes.some(function(t) { return t === "servicePrincipal"; })); return '<div class="audit-item"><span class="audit-action">' + fmtDate(si.createdDateTime) + '</span><span style="color:#3a5068;font-size:10px">' + (siSP ? "SP" : escapeHtml(si.userDisplayName || si.userPrincipalName || "—")) + ' | ' + escapeHtml(si.ipAddress || "—") + '</span></div>'; }).join("") : '') + '</div>';
     } else {
-      lastUsoHtml = '<div class="audit-wrap">' +
-        '<div class="audit-item"><span class="audit-action">Nenhum sign-in encontrado</span><span style="color:#ef4444;font-size:11px">App possivelmente inativo</span></div>' +
-        '<div style="font-size:11px;color:#3a5068;padding:8px;line-height:1.6">Sign-ins do tipo client_credentials (automacao sem usuario) nao aparecem nos logs padrao. Verifique Azure Monitor Workbooks para fluxos de app-only.</div>' +
-      '</div>';
+      lastUsoHtml = '<div class="audit-wrap"><div class="audit-item"><span class="audit-action">Nenhum sign-in encontrado</span><span style="color:#ef4444;font-size:11px">App possivelmente inativo</span></div><div style="font-size:11px;color:#3a5068;padding:8px;line-height:1.6">Sign-ins do tipo client_credentials nao aparecem nos logs padrao. Verifique Azure Monitor Workbooks.</div></div>';
     }
 
-    // Onde e Usado — workloads + write categories + SP info
-    var usage = a._usageAnalysis;
-    var sp = a._servicePrincipal;
+    var usage = a._usageAnalysis, sp = a._servicePrincipal;
+    var writeCatLabels = { groups:"Grupos", users:"Usuarios", email:"E-mail", files:"Arquivos/SharePoint", directory:"Diretorio", apps:"Aplicacoes" };
+    var usoHtml = '<div class="audit-wrap"><div class="audit-title">Onde este app e provavelmente usado:</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + (usage.workloads.length > 0 ? usage.workloads.map(function(w) { return '<span class="wb">' + escapeHtml(w) + '</span>'; }).join("") : '<span style="color:#3a5068">Nenhum workload identificado</span>') + '</div><div class="audit-title">Categorias com permissao de escrita:</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + (writeCategories.length > 0 ? writeCategories.map(function(c) { return '<span class="wc-badge">' + (writeCatLabels[c] || c) + '</span>'; }).join("") : '<span style="color:#4ade80;font-size:12px">Nenhuma escrita detectada</span>') + '</div><div class="audit-title">Permissoes de escrita detalhadas:</div>' + (writePerms.length > 0 ? writePerms.map(function(p) { var risk = classifyPerm(p.name); return '<div class="audit-item"><span class="audit-action" style="color:' + riskColor[risk] + ';font-weight:600">&#9999; ' + escapeHtml(permLabel(p)) + '</span><span style="color:#3a5068;font-size:10px">' + escapeHtml(p.resource || "") + '</span></div>'; }).join("") : '<div class="audit-item"><span style="color:#4ade80">Nenhuma permissao de escrita</span></div>') + (sp ? '<div class="audit-title" style="margin-top:12px">Service Principal:</div><div class="audit-item"><span class="audit-action">Tipo</span><span style="color:#94a3b8">' + escapeHtml(sp.servicePrincipalType || "N/A") + '</span></div><div class="audit-item"><span class="audit-action">Publisher</span><span style="color:#94a3b8">' + escapeHtml(sp.publisherName || "N/A") + '</span></div>' + (sp.homepage ? '<div class="audit-item"><span class="audit-action">Homepage</span><span style="color:#60a5fa;font-size:10px">' + escapeHtml(sp.homepage) + '</span></div>' : '') + (sp.replyUrls && sp.replyUrls.length > 0 ? '<div class="audit-item"><span class="audit-action">Reply URLs</span><div style="display:flex;flex-direction:column;gap:2px">' + sp.replyUrls.map(function(u) { return '<span style="color:#60a5fa;font-size:10px;font-family:monospace">' + escapeHtml(u) + '</span>'; }).join("") + '</div></div>' : '') : '') + '</div>';
 
-    var workloadsHtml = usage.workloads.length > 0
-      ? usage.workloads.map(function(w) { return '<span class="wb">' + escapeHtml(w) + '</span>'; }).join("")
-      : '<span style="color:#3a5068">Nenhum workload identificado pelas permissoes</span>';
-
-    // Categorias de write de forma legivel
-    var writeCatLabels = { groups: "Grupos", users: "Usuarios", email: "E-mail", files: "Arquivos/SharePoint", directory: "Diretorio", apps: "Aplicacoes" };
-    var writeCatHtml = writeCategories.length > 0
-      ? writeCategories.map(function(c) { return '<span class="wc-badge">' + (writeCatLabels[c] || c) + '</span>'; }).join("")
-      : '<span style="color:#4ade80;font-size:12px">Nenhuma escrita detectada</span>';
-
-    var writePermsHtml = writePerms.length > 0
-      ? writePerms.map(function(p) {
-          var risk = classifyPerm(p.name);
-          return '<div class="audit-item"><span class="audit-action" style="color:' + riskColor[risk] + ';font-weight:600">&#9999; ' + escapeHtml(permLabel(p)) + '</span><span style="color:#3a5068;font-size:10px">' + escapeHtml(p.resource || "") + '</span></div>';
-        }).join("")
-      : '<div class="audit-item"><span style="color:#4ade80">Nenhuma permissao de escrita</span></div>';
-
-    var usoHtml = '<div class="audit-wrap">' +
-      '<div class="audit-title">Onde este app e provavelmente usado:</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + workloadsHtml + '</div>' +
-      '<div class="audit-title">Categorias com permissao de escrita:</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + writeCatHtml + '</div>' +
-      '<div class="audit-title">Permissoes de escrita detalhadas:</div>' +
-      writePermsHtml +
-      (sp ? '<div class="audit-title" style="margin-top:12px">Informacoes do Service Principal:</div>' +
-        '<div class="audit-item"><span class="audit-action">Tipo</span><span style="color:#94a3b8">' + escapeHtml(sp.servicePrincipalType || "N/A") + '</span></div>' +
-        '<div class="audit-item"><span class="audit-action">Publisher</span><span style="color:#94a3b8">' + escapeHtml(sp.publisherName || "N/A") + '</span></div>' +
-        (sp.homepage ? '<div class="audit-item"><span class="audit-action">Homepage</span><span style="color:#60a5fa;font-size:10px">' + escapeHtml(sp.homepage) + '</span></div>' : '') +
-        (sp.replyUrls && sp.replyUrls.length > 0 ? '<div class="audit-item"><span class="audit-action">Reply URLs</span><div style="display:flex;flex-direction:column;gap:2px">' + sp.replyUrls.map(function(u) { return '<span style="color:#60a5fa;font-size:10px;font-family:monospace">' + escapeHtml(u) + '</span>'; }).join("") + '</div></div>' : '') +
-        '</div>' : '') +
-    '</div>';
-
-    // Risco
     var riskLevelColor = a._riskLevel === "Critical" ? "#ef4444" : a._riskLevel === "High" ? "#f59e0b" : a._riskLevel === "Medium" ? "#a78bfa" : "#4ade80";
-    var riscoHtml = '<div class="audit-wrap">' +
-      '<div class="audit-item"><span class="audit-action" style="color:#c8d8e8;font-weight:600">Classificacao</span><span style="color:' + riskLevelColor + ';font-family:\'JetBrains Mono\',monospace;font-weight:700;font-size:14px">' + a._riskLevel + '</span></div>' +
-      '<div class="audit-item"><span class="audit-action">Permissoes de escrita</span><span style="color:' + (writePerms.length > 0 ? "#f59e0b" : "#4ade80") + '">' + writePerms.length + ' permissao(oes)</span></div>' +
-      '<div class="audit-item"><span class="audit-action">Owner</span><span style="color:' + (owners.length === 0 ? "#ef4444" : "#4ade80") + '">' + (owners.length === 0 ? "Sem owner (+20pts risco)" : owners.length + " owner(s)") + '</span></div>' +
-      '<div class="audit-item"><span class="audit-action">Ultimo uso</span><span style="color:' + lastUsed.color + '">' + lastUsed.text + (lastUsed.full !== "Nenhum sign-in detectado" ? " — " + lastUsed.full : "") + '</span></div>' +
-      (writePerms.length > 0 ? '<div class="audit-title" style="margin-top:10px">Permissoes criticas:</div>' +
-        writePerms.map(function(p) {
-          var risk = classifyPerm(p.name);
-          return '<div class="audit-item"><span style="color:' + riskColor[risk] + ';font-weight:600">' + escapeHtml(permLabel(p)) + '</span><span style="color:#3a5068;font-size:10px">' + escapeHtml(getPermTooltip(p.name, p.description, risk).substring(0, 70)) + '...</span></div>';
-        }).join("") : '<div class="audit-item"><span style="color:#4ade80">Nenhuma permissao critica</span></div>') +
-    '</div>';
+    var riscoHtml = '<div class="audit-wrap"><div class="audit-item"><span class="audit-action" style="color:#c8d8e8;font-weight:600">Classificacao</span><span style="color:' + riskLevelColor + ';font-family:\'JetBrains Mono\',monospace;font-weight:700;font-size:14px">' + a._riskLevel + '</span></div><div class="audit-item"><span class="audit-action">Permissoes de escrita</span><span style="color:' + (writePerms.length > 0 ? "#f59e0b" : "#4ade80") + '">' + writePerms.length + ' permissao(oes)</span></div><div class="audit-item"><span class="audit-action">Owner</span><span style="color:' + (owners.length === 0 ? "#ef4444" : "#4ade80") + '">' + (owners.length === 0 ? "Sem owner (+20pts risco)" : owners.length + " owner(s)") + '</span></div><div class="audit-item"><span class="audit-action">Ultimo uso</span><span style="color:' + lastUsed.color + '">' + lastUsed.text + (lastUsed.full !== "Nenhum sign-in detectado" ? " — " + lastUsed.full : "") + '</span></div>' + (writePerms.length > 0 ? '<div class="audit-title" style="margin-top:10px">Permissoes criticas:</div>' + writePerms.map(function(p) { var risk = classifyPerm(p.name); return '<div class="audit-item"><span style="color:' + riskColor[risk] + ';font-weight:600">' + escapeHtml(permLabel(p)) + '</span><span style="color:#3a5068;font-size:10px">' + escapeHtml(getPermTooltip(p.name, p.description, risk).substring(0, 70)) + '...</span></div>'; }).join("") : '<div class="audit-item"><span style="color:#4ade80">Nenhuma permissao critica</span></div>') + '</div>';
 
     return '<tr class="ar' + (isRisky ? " risky" : "") + '" onclick="toggle(\'rx-' + uid + '\')">' +
-      '<td><div class="app-name">' + escapeHtml(a.displayName || "—") +
-        (isRisky ? '<span class="risk-badge">App Perm</span>' : '') +
-        (writePerms.length > 0 ? '<span class="write-badge">W</span>' : '') +
-        (writeCategories.includes("groups") ? '<span class="wcat-badge">Groups</span>' : '') +
-        (writeCategories.includes("users") ? '<span class="wcat-badge">Users</span>' : '') +
-        (writeCategories.includes("email") ? '<span class="wcat-badge">Mail</span>' : '') +
-        (writeCategories.includes("files") ? '<span class="wcat-badge">Files</span>' : '') +
-        ((a.secrets && a.secrets.length > 0) ? '<span class="secret-badge">' + a.secrets.length + 's</span>' : '') +
-        (a.notes ? '<span class="notes-badge">n</span>' : '') +
-        '<span class="rl-badge" style="border-color:' + riskBadgeColor + ';color:' + riskBadgeColor + '">' + a._riskLevel + '</span>' +
-      '</div></td>' +
+      '<td><div class="app-name">' + escapeHtml(a.displayName || "—") + (isRisky ? '<span class="risk-badge">App Perm</span>' : '') + (writePerms.length > 0 ? '<span class="write-badge">W</span>' : '') + (writeCategories.includes("groups") ? '<span class="wcat-badge">Groups</span>' : '') + (writeCategories.includes("users") ? '<span class="wcat-badge">Users</span>' : '') + (writeCategories.includes("email") ? '<span class="wcat-badge">Mail</span>' : '') + (writeCategories.includes("files") ? '<span class="wcat-badge">Files</span>' : '') + ((a.secrets && a.secrets.length > 0) ? '<span class="secret-badge">' + a.secrets.length + 's</span>' : '') + (a.notes ? '<span class="notes-badge">n</span>' : '') + '<span class="rl-badge" style="border-color:' + riskBadgeColor + ';color:' + riskBadgeColor + '">' + a._riskLevel + '</span></div></td>' +
       '<td>' + fmtDate(a.createdDateTime) + '</td>' +
       '<td>' + lastUsedCell + '</td>' +
       '<td>' + createdBy + '</td>' +
@@ -879,10 +647,7 @@ function buildDashboard(session, sessionId) {
         var color = c.severity === "critico" ? "#ef4444" : c.severity === "aviso" ? "#f59e0b" : c.severity === "melhora" ? "#4ade80" : "#60a5fa";
         var pd = "";
         if (c.permChanges && c.permChanges.length > 0) {
-          pd = '<div class="perm-changes">' + c.permChanges.map(function(pc) {
-            var pcc = pc.action === "adicionada" ? (pc.severity === "critico" ? "#ef4444" : "#f59e0b") : "#4ade80";
-            return '<span class="pc" style="color:' + pcc + '">' + (pc.action === "adicionada" ? "+" : "-") + ' [' + escapeHtml(pc.type) + '] ' + escapeHtml(pc.name) + '</span>';
-          }).join("") + '</div>';
+          pd = '<div class="perm-changes">' + c.permChanges.map(function(pc) { var pcc = pc.action === "adicionada" ? (pc.severity === "critico" ? "#ef4444" : "#f59e0b") : "#4ade80"; return '<span class="pc" style="color:' + pcc + '">' + (pc.action === "adicionada" ? "+" : "-") + ' [' + escapeHtml(pc.type) + '] ' + escapeHtml(pc.name) + '</span>'; }).join("") + '</div>';
         }
         return '<div class="change-item" style="border-left-color:' + color + '"><div class="change-top"><span style="color:' + color + ';font-weight:700;font-size:12px">[' + icon + ']</span><span class="change-msg">' + escapeHtml(c.message) + '</span><span class="change-time">' + fmtDate(c.detectedAt) + '</span></div>' + pd + '</div>';
       }).join("");
@@ -903,9 +668,13 @@ function buildDashboard(session, sessionId) {
         return '<div class="change-item" style="border-left-color:' + color + '"><div class="change-top"><span style="color:' + color + ';font-weight:700">[!]</span><span class="change-msg"><strong>' + escapeHtml(item.appName) + '</strong> — ' + escapeHtml(item.secret.displayName) + '</span><span class="change-time" style="color:' + color + '">' + label + '</span></div><div style="font-size:10px;color:#3a5068;margin-top:4px;padding-left:20px">Criada: ' + fmtDateOnly(item.secret.startDate) + ' / Expira: ' + fmtDateOnly(item.secret.endDate) + '</div></div>';
       }).join("");
 
-  // ── HTML do dashboard ──────────────────────────────────────────────────────
+  // Serializa datasets para uso no cliente (export Excel)
+  var datasetsJson = safeJson(appDatasets);
+
   return '<!DOCTYPE html><html lang="pt-BR"><head>' +
 '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>App Monitor</title>' +
+// SheetJS via CDN para export Excel no browser
+'<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>' +
 '<style>' +
 '@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap");' +
 '*{box-sizing:border-box;margin:0;padding:0}body{font-family:"Inter",sans-serif;background:#060a0f;color:#c8d8e8;min-height:100vh}' +
@@ -914,24 +683,24 @@ function buildDashboard(session, sessionId) {
 '.tid{font-size:10px;color:#2a4060;margin-top:2px;font-family:"JetBrains Mono",monospace}' +
 '.hdr-right{display:flex;align-items:center;gap:12px}' +
 '.live{display:flex;align-items:center;gap:5px;font-size:11px;color:#4ade80;background:#0a1f10;padding:4px 10px;border-radius:20px;border:1px solid #166534;font-family:"JetBrains Mono",monospace}' +
-'.dot{width:6px;height:6px;background:#4ade80;border-radius:50%;animation:pulse 2s infinite}' +
-'@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}' +
+'.dot{width:6px;height:6px;background:#4ade80;border-radius:50%;animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}' +
 '.cd{font-size:11px;color:#2a4060;font-family:"JetBrains Mono",monospace}' +
 '.ri{font-size:16px;cursor:pointer;color:#2a4060;transition:color .2s}.ri:hover{color:#38bdf8}' +
 '.refresh-spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}' +
 '.upd{font-size:11px;color:#2a4060}' +
 '.wrap{max-width:1500px;margin:0 auto;padding:20px}' +
-/* Stats - grid de 12 colunas para caber tudo */
 '.stats{display:grid;grid-template-columns:repeat(12,1fr);gap:6px;margin-bottom:14px}' +
 '.sc{background:#0d1520;border:1px solid #1a2840;border-radius:8px;padding:10px 6px;text-align:center;cursor:pointer;transition:all .2s}' +
 '.sc:hover{border-color:#38bdf8;transform:translateY(-2px)}.sc.active-tab{border-color:#0ea5e9;background:#061828}' +
-'.sn{font-size:20px;font-weight:700;color:#c8d8e8;font-family:"JetBrains Mono",monospace}' +
-'.sn.changed{animation:flash .6s}@keyframes flash{0%,100%{opacity:1}50%{opacity:.2}}' +
+'.sn{font-size:20px;font-weight:700;color:#c8d8e8;font-family:"JetBrains Mono",monospace}.sn.changed{animation:flash .6s}@keyframes flash{0%,100%{opacity:1}50%{opacity:.2}}' +
 '.sl{font-size:8px;color:#3a5068;margin-top:2px;text-transform:uppercase;letter-spacing:.5px;line-height:1.2}' +
 '.layout{display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:start}' +
 '.card{background:#0d1520;border:1px solid #1a2840;border-radius:12px;padding:16px;margin-bottom:12px}' +
-'.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}' +
+'.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px}' +
 '.card-title{font-family:"JetBrains Mono",monospace;font-size:11px;color:#3a5068;text-transform:uppercase;letter-spacing:2px}' +
+// Botao de export Excel
+'.btn-excel{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:#166534;border:1px solid #22c55e40;border-radius:6px;color:#4ade80;font-size:10px;font-family:"JetBrains Mono",monospace;cursor:pointer;transition:all .2s;text-transform:uppercase;letter-spacing:1px;white-space:nowrap}' +
+'.btn-excel:hover{background:#15803d;border-color:#22c55e}' +
 '.search-bar{width:100%;background:#060a0f;border:1px solid #1a2840;border-radius:7px;padding:8px 12px;color:#c8d8e8;font-size:12px;margin-bottom:10px;outline:none;font-family:"JetBrains Mono",monospace;transition:border-color .2s}' +
 '.search-bar:focus{border-color:#0ea5e9}' +
 '.tab-panel{display:none}.tab-panel.active{display:block}' +
@@ -992,41 +761,35 @@ function buildDashboard(session, sessionId) {
 '</style></head><body>' +
 
 '<div id="toast-area"></div>' +
-'<div class="hdr">' +
-  '<div class="hdr-brand"><div><h1>// APP MONITOR</h1><div class="tid">' + session.tenantId + '</div></div></div>' +
-  '<div class="hdr-right">' +
-    '<div class="live"><div class="dot"></div>LIVE</div>' +
-    '<div class="cd" id="cd">NEXT: <strong id="timer">5:00</strong></div>' +
-    '<div class="ri" id="ri" title="Atualizar agora" onclick="forceRefresh()">&#8635;</div>' +
-    '<div class="upd">UPD: <span id="upd">agora</span></div>' +
-  '</div>' +
-'</div>' +
+'<div class="hdr"><div class="hdr-brand"><div><h1>ENTERPRISE APPLICATIONS MONITOR</h1><div class="tid">' + session.tenantId + '</div></div></div>' +
+'<div class="hdr-right"><div class="live"><div class="dot"></div>LIVE</div><div class="cd" id="cd">NEXT: <strong id="timer">5:00</strong></div><div class="ri" id="ri" title="Atualizar agora" onclick="forceRefresh()">&#8635;</div><div class="upd">UPD: <span id="upd">agora</span></div></div></div>' +
 
 '<div class="wrap">' +
-// Stats — 12 abas
 '<div class="stats">' +
-  '<div class="sc active-tab" id="tab-btn-all" onclick="switchMainTab(\'all\',this)"><div class="sn" id="stTotal">' + allApps.length + '</div><div class="sl">Todos</div></div>' +
-  '<div class="sc" id="tab-btn-risky" onclick="switchMainTab(\'risky\',this)"><div class="sn" id="stRisky" style="color:#f59e0b">' + riskyApps.length + '</div><div class="sl">App Perm</div></div>' +
-  '<div class="sc" id="tab-btn-write" onclick="switchMainTab(\'write\',this)"><div class="sn" id="stWrite" style="color:#ef4444">' + writeApps.length + '</div><div class="sl">Write</div></div>' +
-  '<div class="sc" id="tab-btn-writegroups" onclick="switchMainTab(\'writegroups\',this)"><div class="sn" id="stWriteGroups" style="color:#ef4444">' + writeGroupsApps.length + '</div><div class="sl">W Groups</div></div>' +
-  '<div class="sc" id="tab-btn-writeusers" onclick="switchMainTab(\'writeusers\',this)"><div class="sn" id="stWriteUsers" style="color:#ef4444">' + writeUsersApps.length + '</div><div class="sl">W Users</div></div>' +
-  '<div class="sc" id="tab-btn-writeemail" onclick="switchMainTab(\'writeemail\',this)"><div class="sn" id="stWriteEmail" style="color:#ef4444">' + writeEmailApps.length + '</div><div class="sl">W E-mail</div></div>' +
-  '<div class="sc" id="tab-btn-writefiles" onclick="switchMainTab(\'writefiles\',this)"><div class="sn" id="stWriteFiles" style="color:#ef4444">' + writeFilesApps.length + '</div><div class="sl">W Files</div></div>' +
-  '<div class="sc" id="tab-btn-critical" onclick="switchMainTab(\'critical\',this)"><div class="sn" id="stCritical" style="color:#ef4444">' + criticalApps.length + '</div><div class="sl">Critical</div></div>' +
-  '<div class="sc" id="tab-btn-recent" onclick="switchMainTab(\'recent\',this)"><div class="sn" id="stRecent" style="color:#60a5fa">' + recentApps.length + '</div><div class="sl">30 dias</div></div>' +
-  '<div class="sc" id="tab-btn-noowner" onclick="switchMainTab(\'noowner\',this)"><div class="sn" id="stNoOwner" style="color:#ef4444">' + noOwnerApps.length + '</div><div class="sl">Sem Owner</div></div>' +
-  '<div class="sc" id="tab-btn-secrets" onclick="switchMainTab(\'secrets\',this)"><div class="sn" id="stSecrets" style="color:#a78bfa">' + appsWithSecrets.length + '</div><div class="sl">Secrets</div></div>' +
-  '<div class="sc" id="tab-btn-expsecrets" onclick="switchMainTab(\'expsecrets\',this)"><div class="sn" id="stExpSecrets" style="color:#ef4444">' + expSecrets.length + '</div><div class="sl">Exp.Secrets</div></div>' +
+'<div class="sc active-tab" id="tab-btn-all" onclick="switchMainTab(\'all\',this)"><div class="sn" id="stTotal">' + allApps.length + '</div><div class="sl">Todos</div></div>' +
+'<div class="sc" id="tab-btn-risky" onclick="switchMainTab(\'risky\',this)"><div class="sn" id="stRisky" style="color:#f59e0b">' + riskyApps.length + '</div><div class="sl">App Perm</div></div>' +
+'<div class="sc" id="tab-btn-write" onclick="switchMainTab(\'write\',this)"><div class="sn" id="stWrite" style="color:#ef4444">' + writeApps.length + '</div><div class="sl">Write</div></div>' +
+'<div class="sc" id="tab-btn-writegroups" onclick="switchMainTab(\'writegroups\',this)"><div class="sn" id="stWriteGroups" style="color:#ef4444">' + writeGroupsApps.length + '</div><div class="sl">W Groups</div></div>' +
+'<div class="sc" id="tab-btn-writeusers" onclick="switchMainTab(\'writeusers\',this)"><div class="sn" id="stWriteUsers" style="color:#ef4444">' + writeUsersApps.length + '</div><div class="sl">W Users</div></div>' +
+'<div class="sc" id="tab-btn-writeemail" onclick="switchMainTab(\'writeemail\',this)"><div class="sn" id="stWriteEmail" style="color:#ef4444">' + writeEmailApps.length + '</div><div class="sl">W E-mail</div></div>' +
+'<div class="sc" id="tab-btn-writefiles" onclick="switchMainTab(\'writefiles\',this)"><div class="sn" id="stWriteFiles" style="color:#ef4444">' + writeFilesApps.length + '</div><div class="sl">W Files</div></div>' +
+'<div class="sc" id="tab-btn-critical" onclick="switchMainTab(\'critical\',this)"><div class="sn" id="stCritical" style="color:#ef4444">' + criticalApps.length + '</div><div class="sl">Critical</div></div>' +
+'<div class="sc" id="tab-btn-recent" onclick="switchMainTab(\'recent\',this)"><div class="sn" id="stRecent" style="color:#60a5fa">' + recentApps.length + '</div><div class="sl">30 dias</div></div>' +
+'<div class="sc" id="tab-btn-noowner" onclick="switchMainTab(\'noowner\',this)"><div class="sn" id="stNoOwner" style="color:#ef4444">' + noOwnerApps.length + '</div><div class="sl">Sem Owner</div></div>' +
+'<div class="sc" id="tab-btn-secrets" onclick="switchMainTab(\'secrets\',this)"><div class="sn" id="stSecrets" style="color:#a78bfa">' + appsWithSecrets.length + '</div><div class="sl">Secrets</div></div>' +
+'<div class="sc" id="tab-btn-expsecrets" onclick="switchMainTab(\'expsecrets\',this)"><div class="sn" id="stExpSecrets" style="color:#ef4444">' + expSecrets.length + '</div><div class="sl">Exp.Secrets</div></div>' +
 '</div>' +
 
 '<div class="layout"><div><div class="card">' +
 '<div class="card-header">' +
   '<div class="card-title" id="tabLabel">Todas as Aplicacoes (' + allApps.length + ')</div>' +
-  '<div class="leg"><span style="color:#ef4444">■ Critico</span><span style="color:#f59e0b">■ Alto</span><span style="color:#4ade80">■ Normal</span><span>W=Write | Clique p/ expandir | Hover na permissao p/ detalhe</span></div>' +
+  '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+    '<div class="leg" style="margin:0"><span style="color:#ef4444">■ Critico</span><span style="color:#f59e0b">■ Alto</span><span style="color:#4ade80">■ Normal</span><span>W=Write</span></div>' +
+    '<button class="btn-excel" onclick="exportExcel()">&#8595; Excel</button>' +
+  '</div>' +
 '</div>' +
 '<input class="search-bar" id="search" type="text" placeholder="Buscar por nome, owner, criador, permissao, workload..." oninput="filterTable()">' +
 
-// Paineis de cada aba
 '<div id="tp-all" class="tab-panel active"><table><thead><tr><th>Nome</th><th>Criado em</th><th>Ultimo Uso</th><th>Criado por</th><th>Owner(s)</th><th>Perms</th></tr></thead><tbody>' + allApps.map(function(a) { return buildAppRow(a, "all"); }).join("") + '</tbody></table></div>' +
 '<div id="tp-risky" class="tab-panel">' + buildTabTable(riskyApps, "Nenhum app com Application Permission", "risky") + '</div>' +
 '<div id="tp-write" class="tab-panel">' + buildTabTable(writeApps, "Nenhum app com permissoes de escrita", "write") + '</div>' +
@@ -1041,17 +804,8 @@ function buildDashboard(session, sessionId) {
 '<div id="tp-expsecrets" class="tab-panel">' + buildTabTable(expSecrets, "Nenhuma secret expirada ou expirando", "expsecrets") + '</div>' +
 '</div></div>' +
 
-// Painel lateral
-'<div>' +
-  '<div class="side-card">' +
-    '<div class="side-title"><span>Mudancas (24h)</span><span style="color:#2a4060">' + changes24h.length + '</span></div>' +
-    '<div id="changesPanel">' + changesHtml + '</div>' +
-  '</div>' +
-  '<div class="side-card">' +
-    '<div class="side-title"><span>Secrets Expirando</span><span style="color:#2a4060">' + allSecretIssues.length + '</span></div>' +
-    '<div id="secretAlertsPanel">' + secretAlertsHtml + '</div>' +
-  '</div>' +
-'</div>' +
+'<div><div class="side-card"><div class="side-title"><span>Mudancas (24h)</span><span style="color:#2a4060">' + changes24h.length + '</span></div><div id="changesPanel">' + changesHtml + '</div></div>' +
+'<div class="side-card"><div class="side-title"><span>Secrets Expirando</span><span style="color:#2a4060">' + allSecretIssues.length + '</span></div><div id="secretAlertsPanel">' + secretAlertsHtml + '</div></div></div>' +
 '</div></div>' +
 
 '<div class="foot"><a href="/">Nova analise</a></div>' +
@@ -1060,6 +814,9 @@ function buildDashboard(session, sessionId) {
 'var SID="' + sessionId + '";var INTERVAL=5*60*1000;var next=Date.now()+INTERVAL;var busy=false;var currentTab="all";' +
 'var initChanges=' + initChangesJson + ';' +
 'if(initChanges&&initChanges.length>0){setTimeout(function(){initChanges.forEach(showToast);},700);}' +
+
+// Datasets para export — todos os grupos pre-calculados no servidor
+'var DATASETS=' + datasetsJson + ';' +
 
 'setInterval(function(){if(busy)return;var r=Math.max(0,next-Date.now());var m=Math.floor(r/60000),s=Math.floor((r%60000)/1000);document.getElementById("timer").textContent=m+":"+(s<10?"0":"")+s;if(r<=0)doRefresh();},1000);' +
 'function forceRefresh(){next=Date.now();}' +
@@ -1094,6 +851,93 @@ function buildDashboard(session, sessionId) {
 'function upd(id,v){var el=document.getElementById(id);if(el&&el.textContent!=String(v)){el.textContent=v;el.classList.remove("changed");void el.offsetWidth;el.classList.add("changed");}}' +
 'function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/\'/g,"&#39;");}' +
 
+// ── exportExcel: gera .xlsx da aba atual no browser ──────────────────────────
+'function exportExcel(){' +
+'  if(typeof XLSX==="undefined"){alert("SheetJS nao carregado. Verifique sua conexao.");return;}' +
+'  var dataset=DATASETS[currentTab]||[];' +
+'  if(dataset.length===0){alert("Nenhum dado para exportar nesta aba.");return;}' +
+'  var labels={all:"Todas",risky:"App_Permissions",write:"Write",writegroups:"Write_Groups",writeusers:"Write_Users",writeemail:"Write_Email",writefiles:"Write_Files",critical:"Critical",recent:"Criados_30d",noowner:"Sem_Owner",secrets:"Com_Secrets",expsecrets:"Exp_Secrets"};' +
+// Monta linhas da planilha
+'  var rows=dataset.map(function(a){' +
+'    var owners=(a._owners||[]).map(function(o){return o.displayName||o.userPrincipalName||o.mail||"";}).join("; ");' +
+'    var appPerms=(a.appRoles||[]).map(function(p){return p.name||p.id;}).join("; ");' +
+'    var delPerms=(a.delegated||[]).map(function(p){return p.name||p.id;}).join("; ");' +
+'    var writePerms=(a._writePermissions||[]).map(function(p){return p.name||p.id;}).join("; ");' +
+'    var workloads=((a._usageAnalysis&&a._usageAnalysis.workloads)||[]).join("; ");' +
+'    var secrets=(a.secrets||[]).map(function(s){return s.displayName+"("+s.status+",exp:"+( s.endDate?new Date(s.endDate).toLocaleDateString("pt-BR"):"sem data")+")";}).join("; ");' +
+'    var lastSignIn=a._lastSignIn&&a._lastSignIn.length>0?new Date(a._lastSignIn[0].createdDateTime).toLocaleString("pt-BR"):"";' +
+'    var lastUser=a._lastSignIn&&a._lastSignIn.length>0?(a._lastSignIn[0].userDisplayName||a._lastSignIn[0].userPrincipalName||a._lastSignIn[0].servicePrincipalName||""):"";' +
+'    var createdBy=a._createdBy||"";' +
+'    return {' +
+'      "Nome": a.displayName||"",' +
+'      "App ID": a.appId||"",' +
+'      "Criado em": a.createdDateTime?new Date(a.createdDateTime).toLocaleString("pt-BR"):"",' +
+'      "Criado por": createdBy,' +
+'      "Owner(s)": owners,' +
+'      "Risco": a._riskLevel||"",' +
+'      "Ultimo Uso": lastSignIn,' +
+'      "Ultimo Usuario": lastUser,' +
+'      "Sign-in Audience": a.signInAudience||"",' +
+'      "App Permissions (APP)": appPerms,' +
+'      "Delegated Permissions (DEL)": delPerms,' +
+'      "Write Permissions": writePerms,' +
+'      "Write em Groups": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Group.")})?("Sim"):"Nao",' +
+'      "Write em Users": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("User.")})?("Sim"):"Nao",' +
+'      "Write em E-mail": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Mail.")||(p.name||"").startsWith("MailboxSettings.")})?("Sim"):"Nao",' +
+'      "Write em Files": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Files.")||(p.name||"").startsWith("Sites.")})?("Sim"):"Nao",' +
+'      "Workloads": workloads,' +
+'      "Secrets": secrets,' +
+'      "Notas": a.notes||""' +
+'    };' +
+'  });' +
+
+// Cria workbook com duas abas: dados + resumo
+'  var wb=XLSX.utils.book_new();' +
+
+// Aba principal com os dados
+'  var ws=XLSX.utils.json_to_sheet(rows);' +
+
+// Larguras de coluna
+'  ws["!cols"]=[' +
+'    {wch:40},{wch:38},{wch:20},{wch:25},{wch:30},{wch:10},' +
+'    {wch:20},{wch:25},{wch:18},{wch:60},{wch:60},{wch:50},' +
+'    {wch:15},{wch:14},{wch:15},{wch:14},{wch:50},{wch:60},{wch:30}' +
+'  ];' +
+
+'  XLSX.utils.book_append_sheet(wb,ws,"Apps");' +
+
+// Aba de resumo
+'  var summary=[' +
+'    ["Relatorio: Enterprise Applications Monitor"],' +
+'    ["Tenant ID","' + session.tenantId + '"],' +
+'    ["Gerado em",new Date().toLocaleString("pt-BR")],' +
+'    ["Aba exportada",labels[currentTab]||currentTab],' +
+'    ["Total de apps",dataset.length],' +
+'    [],' +
+'    ["Categoria","Quantidade"],' +
+'    ["Total de apps",' + allApps.length + '],' +
+'    ["Com App Permission",' + riskyApps.length + '],' +
+'    ["Com Write Permission",' + writeApps.length + '],' +
+'    ["Write em Groups",' + writeGroupsApps.length + '],' +
+'    ["Write em Users",' + writeUsersApps.length + '],' +
+'    ["Write em E-mail",' + writeEmailApps.length + '],' +
+'    ["Write em Files",' + writeFilesApps.length + '],' +
+'    ["Risco Critical",' + criticalApps.length + '],' +
+'    ["Criados nos ultimos 30 dias",' + recentApps.length + '],' +
+'    ["Sem Owner",' + noOwnerApps.length + '],' +
+'    ["Com Secrets",' + appsWithSecrets.length + '],' +
+'    ["Secrets Expirando/Expiradas",' + expSecrets.length + '],' +
+'  ];' +
+'  var wsSummary=XLSX.utils.aoa_to_sheet(summary);' +
+'  wsSummary["!cols"]=[{wch:35},{wch:45}];' +
+'  XLSX.utils.book_append_sheet(wb,wsSummary,"Resumo");' +
+
+// Baixa o arquivo
+'  var tabName=labels[currentTab]||currentTab;' +
+'  var ts=new Date().toISOString().slice(0,10);' +
+'  XLSX.writeFile(wb,"EnterpriseApps_"+tabName+"_"+ts+".xlsx");' +
+'}' +
+
 'function doRefresh(){' +
 '  if(busy)return;busy=true;next=Date.now()+INTERVAL;' +
 '  var ri=document.getElementById("ri");ri.classList.add("refresh-spin");' +
@@ -1101,23 +945,21 @@ function buildDashboard(session, sessionId) {
 '  fetch("/refresh/"+SID).then(function(r){return r.json();}).then(function(data){' +
 '    if(data.error){showToast({severity:"critico",message:"Erro: "+data.error});return;}' +
 '    var apps=data.apps;' +
-'    upd("stTotal",apps.length);' +
-'    upd("stRisky",apps.filter(function(a){return a.appRoles&&a.appRoles.length>0;}).length);' +
-'    upd("stWrite",apps.filter(function(a){return a._writePermissions&&a._writePermissions.length>0;}).length);' +
-'    upd("stCritical",apps.filter(function(a){return a._riskLevel==="Critical";}).length);' +
-'    upd("stRecent",apps.filter(function(a){return a.createdDateTime&&(Date.now()-new Date(a.createdDateTime).getTime())/86400000<=30;}).length);' +
-'    upd("stNoOwner",apps.filter(function(a){return !a._owners||a._owners.length===0;}).length);' +
-'    upd("stSecrets",apps.filter(function(a){return a.secrets&&a.secrets.length>0;}).length);' +
-'    upd("stExpSecrets",apps.filter(function(a){return(a.secrets||[]).some(function(s){return s.status==="expirada"||s.status==="expirando";});}).length);' +
-'    if(data.changesLast24h){' +
-'      var ch=data.changesLast24h;var panel=document.getElementById("changesPanel");' +
+// Atualiza datasets em memoria para o proximo export refletir os dados novos
+'    DATASETS.all=apps;' +
+'    DATASETS.risky=apps.filter(function(a){return a.appRoles&&a.appRoles.length>0;});' +
+'    DATASETS.write=apps.filter(function(a){return a._writePermissions&&a._writePermissions.length>0;});' +
+'    DATASETS.critical=apps.filter(function(a){return a._riskLevel==="Critical";});' +
+'    DATASETS.recent=apps.filter(function(a){return a.createdDateTime&&(Date.now()-new Date(a.createdDateTime).getTime())/86400000<=30;});' +
+'    DATASETS.noowner=apps.filter(function(a){return !a._owners||a._owners.length===0;});' +
+'    DATASETS.secrets=apps.filter(function(a){return a.secrets&&a.secrets.length>0;});' +
+'    DATASETS.expsecrets=apps.filter(function(a){return(a.secrets||[]).some(function(s){return s.status==="expirada"||s.status==="expirando";});});' +
+'    upd("stTotal",apps.length);upd("stRisky",DATASETS.risky.length);upd("stWrite",DATASETS.write.length);' +
+'    upd("stCritical",DATASETS.critical.length);upd("stRecent",DATASETS.recent.length);upd("stNoOwner",DATASETS.noowner.length);' +
+'    upd("stSecrets",DATASETS.secrets.length);upd("stExpSecrets",DATASETS.expsecrets.length);' +
+'    if(data.changesLast24h){var ch=data.changesLast24h;var panel=document.getElementById("changesPanel");' +
 '      if(ch.length===0){panel.innerHTML=\'<div class="no-changes">Nenhuma mudanca nas ultimas 24 horas</div>\';}' +
-'      else{panel.innerHTML=ch.slice().reverse().map(function(c){' +
-'        var icon=c.severity==="critico"?"[!!]":c.severity==="aviso"?"[!]":c.type==="removido"?"[-]":c.type==="novo"?"[+]":"[ok]";' +
-'        var color=c.severity==="critico"?"#ef4444":c.severity==="aviso"?"#f59e0b":c.severity==="melhora"?"#4ade80":"#60a5fa";' +
-'        var pd="";if(c.permChanges&&c.permChanges.length>0){pd=\'<div class="perm-changes">\'+c.permChanges.map(function(pc){var pcc=pc.action==="adicionada"?(pc.severity==="critico"?"#ef4444":"#f59e0b"):"#4ade80";return\'<span class="pc" style="color:\'+pcc+\'">\'+(pc.action==="adicionada"?"+":"-")+\' [\'+esc(pc.type)+\'] \'+esc(pc.name)+"</span>";}).join("")+"</div>";}' +
-'        return\'<div class="change-item" style="border-left-color:\'+color+\'"><div class="change-top"><span style="color:\'+color+\';font-weight:700;font-size:10px">\'+icon+\'</span><span class="change-msg">\'+esc(c.message)+\'</span><span class="change-time">\'+new Date(c.detectedAt).toLocaleString("pt-BR")+\'</span></div>\'+pd+"</div>";' +
-'      }).join("");}' +
+'      else{panel.innerHTML=ch.slice().reverse().map(function(c){var icon=c.severity==="critico"?"[!!]":c.severity==="aviso"?"[!]":c.type==="removido"?"[-]":c.type==="novo"?"[+]":"[ok]";var color=c.severity==="critico"?"#ef4444":c.severity==="aviso"?"#f59e0b":c.severity==="melhora"?"#4ade80":"#60a5fa";var pd="";if(c.permChanges&&c.permChanges.length>0){pd=\'<div class="perm-changes">\'+c.permChanges.map(function(pc){var pcc=pc.action==="adicionada"?(pc.severity==="critico"?"#ef4444":"#f59e0b"):"#4ade80";return\'<span class="pc" style="color:\'+pcc+\'">\'+(pc.action==="adicionada"?"+":"-")+\' [\'+esc(pc.type)+\'] \'+esc(pc.name)+"</span>";}).join("")+"</div>";}return\'<div class="change-item" style="border-left-color:\'+color+\'"><div class="change-top"><span style="color:\'+color+\';font-weight:700;font-size:10px">\'+icon+\'</span><span class="change-msg">\'+esc(c.message)+\'</span><span class="change-time">\'+new Date(c.detectedAt).toLocaleString("pt-BR")+\'</span></div>\'+pd+"</div>";}).join("");}' +
 '      if(data.newChanges&&data.newChanges.length>0){data.newChanges.forEach(showToast);}' +
 '    }' +
 '    document.getElementById("upd").textContent=new Date().toLocaleTimeString("pt-BR");' +
@@ -1126,7 +968,6 @@ function buildDashboard(session, sessionId) {
 '}' +
 
 'function showToast(c){var area=document.getElementById("toast-area");var icons={critico:"[!!]",aviso:"[!]",melhora:"[ok]",info:"[i]"};var t=document.createElement("div");t.className="toast "+(c.severity||"info");t.innerHTML=\'<span style="font-weight:700">\'+(icons[c.severity]||"[i]")+\'</span><span>\'+esc(c.message)+\'</span><span class="tc" onclick="this.parentElement.remove()">x</span>\';area.appendChild(t);setTimeout(function(){if(t.parentElement)t.remove();},10000);}' +
-
 'document.querySelectorAll(".tab-panel").forEach(function(e){if(!e.classList.contains("active"))e.style.display="none";});' +
 '</script></body></html>';
 }
