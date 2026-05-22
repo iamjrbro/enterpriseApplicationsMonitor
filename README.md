@@ -10,6 +10,7 @@ Além das permissões, o painel também consolida informações relevantes de go
 
 O objetivo da ferramenta é apoiar iniciativas de governança, revisão periódica de privilégios, hardening de aplicações corporativas e fortalecimento da postura de segurança do tenant Microsoft Entra ID.
 
+-----
 
 # Como configurar?
 
@@ -40,14 +41,14 @@ npm install @azure/msal-node
 
 Bibliotecas utilizadas no projeto:
 
-| Biblioteca | Função |
-|---|---|
-| express | Responsável pelo servidor web e rotas da aplicação |
-| axios | Realiza chamadas HTTP para APIs |
-| dotenv | Carrega variáveis de ambiente do arquivo `.env` |
-| @azure/msal-node | Responsável pela autenticação Microsoft OAuth e obtenção de tokens |
+|Biblioteca      |Função                                                            |
+|----------------|------------------------------------------------------------------|
+|express         |Responsável pelo servidor web e rotas da aplicação                |
+|axios           |Realiza chamadas HTTP para APIs                                   |
+|dotenv          |Carrega variáveis de ambiente do arquivo `.env`                   |
+|@azure/msal-node|Responsável pela autenticação Microsoft OAuth e obtenção de tokens|
 
----
+-----
 
 # Estrutura necessária do projeto
 
@@ -57,7 +58,7 @@ Também é necessário definir o tipo de Supported Account de acordo com as pol�
 
 A aplicação utilizará essa identidade para autenticar-se no Microsoft Graph API via OAuth 2.0 e realizar a coleta das informações do ambiente, incluindo Enterprise Applications, App Registrations, permissões atribuídas, owners, auditorias e demais dados relacionados à governança do tenant Microsoft Entra ID.
 
----
+-----
 
 # Estrutura do projeto
 
@@ -75,7 +76,7 @@ project/
 └── node_modules/
 ```
 
----
+-----
 
 # Arquivo `.env`
 
@@ -90,10 +91,10 @@ CLIENT_SECRET=
 
 Descrição das variáveis:
 
-| Variável | Função |
-|---|---|
-| CLIENT_ID | Application (Client) ID da Enterprise Application |
-| CLIENT_SECRET | Secret gerada no portal Azure |
+|Variável     |Função                                           |
+|-------------|-------------------------------------------------|
+|CLIENT_ID    |Application (Client) ID da Enterprise Application|
+|CLIENT_SECRET|Secret gerada no portal Azure                    |
 
 Exemplo:
 
@@ -102,7 +103,7 @@ CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
----
+-----
 
 # Arquivo `.gitignore`
 
@@ -122,7 +123,7 @@ Isso evita exposição de:
 - Dependências locais
 - Arquivos sensíveis do ambiente
 
----
+-----
 
 # Arquivo `app.js`
 
@@ -137,7 +138,7 @@ Responsabilidades:
 - Atualização automática dos dados
 - Controle geral da interface
 
----
+-----
 
 # Arquivo `graph.js`
 
@@ -158,7 +159,7 @@ Funções principais:
 
 Esse arquivo centraliza toda integração com a Microsoft.
 
----
+-----
 
 # Arquivo `analyzer.js`
 
@@ -176,6 +177,7 @@ Funções principais:
 
 É nele que ocorre a lógica de governança e segurança do sistema.
 
+-----
 
 # COMO O ENTERPRISE APPLICATIONS MONITOR FUNCIONA
 
@@ -185,11 +187,11 @@ Quando o usuário acessa o sistema, ele realiza login utilizando sua conta Micro
 Durante a autenticação, a Microsoft retorna um token de acesso OAuth 2.0 contendo permissões autorizadas para leitura do tenant.
 Esse token é utilizado para acessar os recursos do ambiente de forma segura através do Microsoft Graph API.
 
----
+-----
 
 ## 2. Coleta de dados
 
-Após o login, o sistema inicia automaticamente a coleta de informações utilizando o Microsoft Graph API, a API oficial da Microsoft responsável pelo acesso aos dados do Azure AD / Microsoft Entra ID. 
+Após o login, o sistema inicia automaticamente a coleta de informações utilizando o Microsoft Graph API, a API oficial da Microsoft responsável pelo acesso aos dados do Azure AD / Microsoft Entra ID.
 O sistema busca automaticamente:
 
 - Todas as aplicações registradas
@@ -205,7 +207,7 @@ O sistema busca automaticamente:
 
 Todas as informações são processadas em tempo real e organizadas internamente pelo sistema.
 
----
+-----
 
 ## 3. Dashboard visual
 
@@ -221,7 +223,7 @@ O sistema organiza automaticamente:
 
 Tudo é exibido através de tabelas dinâmicas, abas inteligentes, indicadores visuais e alertas automáticos.
 
----
+-----
 
 ## 4. Atualização automática
 
@@ -245,7 +247,45 @@ Exemplos:
 - Alteração de owner
 - Consentimento administrativo concedido
 
----
+-----
+
+## 5. Export para Excel
+
+O dashboard permite exportar os dados da aba ativa diretamente para um arquivo `.xlsx`, sem necessidade de ferramentas externas.
+
+O botão **↓ Excel**, localizado no cabeçalho da tabela principal, gera automaticamente um relatório com duas planilhas:
+
+**Planilha “Apps”** — contém uma linha por aplicativo com as seguintes colunas:
+
+|Coluna                     |Descrição                                           |
+|---------------------------|----------------------------------------------------|
+|Nome                       |Nome de exibição da aplicação                       |
+|App ID                     |Identificador único da aplicação                    |
+|Criado em                  |Data e hora de criação                              |
+|Criado por                 |Usuário responsável pela criação                    |
+|Owner(s)                   |Owners atribuídos                                   |
+|Risco                      |Classificação de risco (Critical, High, Medium, Low)|
+|Ultimo Uso                 |Data e hora do último sign-in detectado             |
+|Ultimo Usuario             |Usuário ou Service Principal do último acesso       |
+|Sign-in Audience           |Tipo de conta suportada                             |
+|App Permissions (APP)      |Permissões do tipo Application                      |
+|Delegated Permissions (DEL)|Permissões do tipo Delegated                        |
+|Write Permissions          |Permissões de escrita identificadas                 |
+|Write em Groups            |Indica se possui escrita em grupos                  |
+|Write em Users             |Indica se possui escrita em usuários                |
+|Write em E-mail            |Indica se possui escrita em e-mail                  |
+|Write em Files             |Indica se possui escrita em arquivos                |
+|Workloads                  |Workloads Microsoft identificados pelo sistema      |
+|Secrets                    |Secrets cadastradas com status e vencimento         |
+|Notas                      |Observações internas da aplicação                   |
+
+**Planilha “Resumo”** — contém um consolidado geral do ambiente com os totais por categoria (total de apps, com App Permission, com Write, sem owner, secrets expirando, etc.) e metadados do relatório como Tenant ID e data de geração.
+
+O nome do arquivo exportado segue o padrão `EnterpriseApps_<Aba>_<Data>.xlsx`.
+
+> O export sempre reflete os dados da aba atualmente selecionada no dashboard. Para exportar um grupo específico (ex: apenas apps sem owner), basta selecionar o card correspondente antes de clicar no botão.
+
+-----
 
 # Classificação de permissões
 
@@ -265,7 +305,7 @@ Normalmente incluem:
 
 Caso um aplicativo com esse nível de acesso seja comprometido, o impacto pode afetar toda a organização.
 
----
+-----
 
 ## 🟡 Amarelo — Médio risco
 
@@ -278,7 +318,7 @@ Essas permissões normalmente:
 
 Mesmo sem escrita, ainda representam risco de exposição de dados.
 
----
+-----
 
 ## 🟢 Verde — Baixo risco
 
@@ -292,7 +332,7 @@ Normalmente são:
 
 São consideradas permissões de menor criticidade.
 
----
+-----
 
 # Funcionamento das abas
 
@@ -306,33 +346,19 @@ Ao clicar em um card:
 
 Cada aplicação pode ser expandida individualmente.
 
-Dentro de cada aplicativo existem 5 sub-abas principais:
+Ao expandir uma aplicação, as **Notas Internas** são exibidas diretamente acima das sub-abas, quando existirem, sem necessidade de navegação adicional.
 
-- Notas Internas
+Dentro de cada aplicativo existem **7 sub-abas**:
+
 - Permissões
 - Sugestões
 - Secrets
 - Atividade
+- Último Uso
+- Onde é Usado
+- Risco
 
----
-
-# O que são as Notas Internas?
-
-A aba Notas Internas exibe informações armazenadas nos campos:
-
-- Personalização
-- Propriedades adicionais
-- Observações internas
-
-Esses dados ajudam equipes de governança a documentar:
-
-- Finalidade do aplicativo
-- Responsáveis
-- Integrações
-- Regras internas
-- Observações técnicas
-
----
+-----
 
 # O que são as Permissões?
 
@@ -350,7 +376,7 @@ O sistema mostra:
 - Status administrativo
 - Classificação de risco
 
----
+-----
 
 # O que são as Sugestões?
 
@@ -367,14 +393,14 @@ Com isso, consegue identificar excessos ou inconsistências.
 
 Exemplos:
 
-- "Esse aplicativo provavelmente não necessita dessa permissão crítica."
-- "Aplicativo sem owner definido."
-- "Secret próxima da expiração."
-- "Permissão considerada excessiva para esse tipo de integração."
+- “Esse aplicativo provavelmente não necessita dessa permissão crítica.”
+- “Aplicativo sem owner definido.”
+- “Secret próxima da expiração.”
+- “Permissão considerada excessiva para esse tipo de integração.”
 
 O objetivo é ajudar na aplicação do princípio do menor privilégio.
 
----
+-----
 
 # O que são as Secrets?
 
@@ -394,7 +420,7 @@ O sistema destaca automaticamente:
 - Credenciais antigas
 - Ausência de rotação
 
----
+-----
 
 # O que é Atividade?
 
@@ -421,4 +447,72 @@ Cada evento mostra:
 - Horário
 - Tipo da alteração realizada
 
-Isso permite auditoria completa e rastreabilidade operacional do ambiente.
+-----
+
+# O que é Último Uso?
+
+A aba Último Uso exibe informações detalhadas sobre o sign-in mais recente detectado para a aplicação.
+
+São apresentados:
+
+- Data e hora exata do último acesso
+- Tipo de acesso (sign-in de usuário ou Service Principal)
+- Usuário ou Service Principal responsável
+- IP de origem
+- Cliente utilizado
+- Recurso acessado
+- Localização geográfica
+
+Quando detectados múltiplos acessos recentes, os anteriores são listados em sequência abaixo do último.
+
+Caso nenhum sign-in seja encontrado, o sistema indica que o aplicativo pode estar inativo e orienta sobre a verificação via Azure Monitor Workbooks para cenários com client_credentials.
+
+-----
+
+# O que é Onde é Usado?
+
+A aba Onde é Usado apresenta uma análise do contexto operacional do aplicativo, identificando automaticamente em quais workloads e recursos Microsoft ele provavelmente opera.
+
+São exibidos:
+
+- Workloads identificados com base nas permissões (ex: Exchange Online, SharePoint, Teams, Entra ID)
+- Categorias com permissão de escrita (ex: Grupos, Usuários, E-mail, Arquivos)
+- Detalhamento das permissões de escrita por nível de risco
+- Informações do Service Principal vinculado, incluindo tipo, publisher, homepage e Reply URLs
+
+-----
+
+# O que é Risco?
+
+A aba Risco apresenta a classificação de risco calculada automaticamente para o aplicativo, com base em um conjunto de critérios ponderados.
+
+São considerados na pontuação:
+
+- Presença e criticidade das permissões de escrita
+- Ausência de owner atribuído
+- Histórico de uso (sign-ins detectados)
+
+A classificação final pode ser:
+
+|Nível   |Critério              |
+|--------|----------------------|
+|Critical|Pontuação ≥ 80        |
+|High    |Pontuação ≥ 50        |
+|Medium  |Pontuação ≥ 25        |
+|Low     |Pontuação abaixo de 25|
+
+A aba também lista as permissões críticas identificadas com uma descrição resumida de cada uma, facilitando a priorização durante revisões de segurança.
+
+-----
+
+# Notas Internas
+
+As Notas Internas, quando presentes, são exibidas automaticamente em destaque acima das sub-abas ao expandir um aplicativo, sem necessidade de navegação adicional.
+
+Essas informações são originadas dos campos internos da aplicação no Entra ID e ajudam equipes de governança a documentar:
+
+- Finalidade do aplicativo
+- Responsáveis
+- Integrações
+- Regras internas
+- Observações técnicas
