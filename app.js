@@ -37,7 +37,6 @@ function safeJson(value) {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
-// ─── Graph helpers ────────────────────────────────────────────────────────────
 async function graphGet(url, token) {
   const res = await axios.get("https://graph.microsoft.com/v1.0" + url, {
     headers: { Authorization: "Bearer " + token },
@@ -207,7 +206,6 @@ async function getSpecificSP(appId, token) {
 
 function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
-// ─── Coleta completa ──────────────────────────────────────────────────────────
 async function collectApps(token) {
   var [appsData, allSPs, msGraphSPs, exchangeSPs, auditLogs] = await Promise.all([
     getApps(token),
@@ -319,7 +317,6 @@ async function collectApps(token) {
   return result;
 }
 
-// ─── Detecta mudancas ─────────────────────────────────────────────────────────
 function detectChanges(prevApps, currApps) {
   var changes = [], prevMap = {}, currMap = {};
   for (var a of prevApps) prevMap[a.appId] = a;
@@ -493,23 +490,14 @@ function buildDashboard(session, sessionId) {
   var expSecrets      = apps.filter(function(a) { return (a.secrets || []).some(function(s) { return s.status === "expirada" || s.status === "expirando"; }); });
   var criticalApps    = apps.filter(function(a) { return a._riskLevel === "Critical"; });
 
-  // Serializa todos os grupos de apps como JSON para uso no cliente
   var appDatasets = {
-    all:         allApps,
-    risky:       riskyApps,
-    write:       writeApps,
-    writegroups: writeGroupsApps,
-    writeusers:  writeUsersApps,
-    writeemail:  writeEmailApps,
-    writefiles:  writeFilesApps,
-    critical:    criticalApps,
-    recent:      recentApps,
-    noowner:     noOwnerApps,
-    secrets:     appsWithSecrets,
-    expsecrets:  expSecrets,
+    all: allApps, risky: riskyApps, write: writeApps,
+    writegroups: writeGroupsApps, writeusers: writeUsersApps,
+    writeemail: writeEmailApps, writefiles: writeFilesApps,
+    critical: criticalApps, recent: recentApps,
+    noowner: noOwnerApps, secrets: appsWithSecrets, expsecrets: expSecrets,
   };
 
-  // Tooltips
   var RISK_TOOLTIPS = {
     "Mail.ReadWrite":"CRITICO — Le e modifica todos os e-mails da org.","Mail.Send":"CRITICO — Envia e-mails como qualquer usuario.","Files.ReadWrite.All":"CRITICO — Le e escreve em todos os arquivos SharePoint/OneDrive.","Directory.ReadWrite.All":"CRITICO — Le e modifica todo o diretorio Azure AD.","User.ReadWrite.All":"CRITICO — Cria, edita e deleta qualquer usuario.","RoleManagement.ReadWrite.Directory":"CRITICO — Atribui e remove roles de administrador.","Application.ReadWrite.All":"CRITICO — Cria e modifica qualquer aplicacao, incluindo secrets.","Group.ReadWrite.All":"CRITICO — Cria e modifica todos os grupos.","full_access_as_app":"CRITICO — Acesso total ao Exchange Online como aplicacao.","Mail.Read":"ALTO — Le todos os e-mails de todos os usuarios.","Files.Read.All":"ALTO — Le todos os arquivos de todos os usuarios.","User.Read.All":"ALTO — Le dados de todos os usuarios.","Directory.Read.All":"ALTO — Le todo o diretorio AD.","AuditLog.Read.All":"ALTO — Acessa os logs de auditoria do tenant.","Policy.Read.All":"ALTO — Le todas as politicas de seguranca.","IdentityRiskyUser.Read.All":"ALTO — Le dados de usuarios sinalizados como risco.","User.Read":"NORMAL — Le apenas o perfil do usuario que autorizou.","openid":"NORMAL — Permite login com conta Microsoft.","profile":"NORMAL — Le nome, foto e info basica do usuario logado.","email":"NORMAL — Le o e-mail do usuario logado.","offline_access":"NORMAL — Permite funcionar em segundo plano.","Calendars.Read":"NORMAL — Le eventos de calendario do usuario logado.","Calendars.ReadWrite":"MEDIO — Le e cria eventos no calendario.","Tasks.ReadWrite":"NORMAL — Le e cria tarefas no Planner/To Do.",
   };
@@ -668,12 +656,134 @@ function buildDashboard(session, sessionId) {
         return '<div class="change-item" style="border-left-color:' + color + '"><div class="change-top"><span style="color:' + color + ';font-weight:700">[!]</span><span class="change-msg"><strong>' + escapeHtml(item.appName) + '</strong> — ' + escapeHtml(item.secret.displayName) + '</span><span class="change-time" style="color:' + color + '">' + label + '</span></div><div style="font-size:10px;color:#3a5068;margin-top:4px;padding-left:20px">Criada: ' + fmtDateOnly(item.secret.startDate) + ' / Expira: ' + fmtDateOnly(item.secret.endDate) + '</div></div>';
       }).join("");
 
-  // Serializa datasets para uso no cliente (export Excel)
   var datasetsJson = safeJson(appDatasets);
 
+  // ── Funcao de export reutilizavel (compartilhada entre exportExcel e exportAllExcel)
+  var exportFnJs = `
+function buildExcelRows(dataset) {
+  return dataset.map(function(a) {
+    var owners = (a._owners||[]).map(function(o){return o.displayName||o.userPrincipalName||o.mail||"";}).join("; ");
+    var appPerms = (a.appRoles||[]).map(function(p){return p.name||p.id;}).join("; ");
+    var delPerms = (a.delegated||[]).map(function(p){return p.name||p.id;}).join("; ");
+    var writePerms = (a._writePermissions||[]).map(function(p){return p.name||p.id;}).join("; ");
+    var workloads = ((a._usageAnalysis&&a._usageAnalysis.workloads)||[]).join("; ");
+    var secrets = (a.secrets||[]).map(function(s){return s.displayName+"("+s.status+",exp:"+(s.endDate?new Date(s.endDate).toLocaleDateString("pt-BR"):"sem data")+")";}).join("; ");
+    var lastSignIn = a._lastSignIn&&a._lastSignIn.length>0 ? new Date(a._lastSignIn[0].createdDateTime).toLocaleString("pt-BR") : "";
+    var lastUser = a._lastSignIn&&a._lastSignIn.length>0 ? (a._lastSignIn[0].userDisplayName||a._lastSignIn[0].userPrincipalName||a._lastSignIn[0].servicePrincipalName||"") : "";
+    return {
+      "Nome": a.displayName||"",
+      "App ID": a.appId||"",
+      "Criado em": a.createdDateTime ? new Date(a.createdDateTime).toLocaleString("pt-BR") : "",
+      "Criado por": a._createdBy||"",
+      "Owner(s)": owners,
+      "Risco": a._riskLevel||"",
+      "Ultimo Uso": lastSignIn,
+      "Ultimo Usuario": lastUser,
+      "Sign-in Audience": a.signInAudience||"",
+      "App Permissions (APP)": appPerms,
+      "Delegated Permissions (DEL)": delPerms,
+      "Write Permissions": writePerms,
+      "Write em Groups": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Group.")}) ? "Sim" : "Nao",
+      "Write em Users": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("User.")}) ? "Sim" : "Nao",
+      "Write em E-mail": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Mail.")||(p.name||"").startsWith("MailboxSettings.")}) ? "Sim" : "Nao",
+      "Write em Files": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Files.")||(p.name||"").startsWith("Sites.")}) ? "Sim" : "Nao",
+      "Workloads": workloads,
+      "Secrets": secrets,
+      "Notas": a.notes||""
+    };
+  });
+}
+var COL_WIDTHS = [
+  {wch:40},{wch:38},{wch:20},{wch:25},{wch:30},{wch:10},
+  {wch:20},{wch:25},{wch:18},{wch:60},{wch:60},{wch:50},
+  {wch:15},{wch:14},{wch:15},{wch:14},{wch:50},{wch:60},{wch:30}
+];
+var TAB_LABELS = {
+  all:"Todas", risky:"App_Permissions", write:"Write",
+  writegroups:"Write_Groups", writeusers:"Write_Users",
+  writeemail:"Write_Email", writefiles:"Write_Files",
+  critical:"Critical", recent:"Criados_30d",
+  noowner:"Sem_Owner", secrets:"Com_Secrets", expsecrets:"Exp_Secrets"
+};
+var TAB_LABELS_FULL = {
+  all:"Todas", risky:"App Permissions", write:"Write",
+  writegroups:"Write Groups", writeusers:"Write Users",
+  writeemail:"Write E-mail", writefiles:"Write Files",
+  critical:"Critical", recent:"Criados 30d",
+  noowner:"Sem Owner", secrets:"Com Secrets", expsecrets:"Exp. Secrets"
+};
+var TAB_ORDER = ["all","risky","write","writegroups","writeusers","writeemail","writefiles","critical","recent","noowner","secrets","expsecrets"];
+
+// ── Exporta somente a aba atual — 1 arquivo com sheet "Apps" + sheet "Resumo"
+function exportExcel() {
+  if (typeof XLSX === "undefined") { alert("SheetJS nao carregado. Verifique sua conexao."); return; }
+  var dataset = DATASETS[currentTab] || [];
+  if (dataset.length === 0) { alert("Nenhum dado para exportar nesta aba."); return; }
+  var wb = XLSX.utils.book_new();
+  var ws = XLSX.utils.json_to_sheet(buildExcelRows(dataset));
+  ws["!cols"] = COL_WIDTHS;
+  XLSX.utils.book_append_sheet(wb, ws, "Apps");
+  var summary = [
+    ["Relatorio: Enterprise Applications Monitor"],
+    ["Tenant ID", "` + session.tenantId + `"],
+    ["Gerado em", new Date().toLocaleString("pt-BR")],
+    ["Aba exportada", TAB_LABELS_FULL[currentTab] || currentTab],
+    ["Total nesta aba", dataset.length],
+    [],
+    ["Categoria", "Quantidade"],
+    ["Total geral", DATASETS.all.length],
+    ["App Permissions", DATASETS.risky.length],
+    ["Write", DATASETS.write.length],
+    ["Write Groups", DATASETS.writegroups.length],
+    ["Write Users", DATASETS.writeusers.length],
+    ["Write E-mail", DATASETS.writeemail.length],
+    ["Write Files", DATASETS.writefiles.length],
+    ["Critical", DATASETS.critical.length],
+    ["Criados 30d", DATASETS.recent.length],
+    ["Sem Owner", DATASETS.noowner.length],
+    ["Com Secrets", DATASETS.secrets.length],
+    ["Exp. Secrets", DATASETS.expsecrets.length]
+  ];
+  var wsSummary = XLSX.utils.aoa_to_sheet(summary);
+  wsSummary["!cols"] = [{wch:35},{wch:45}];
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Resumo");
+  var ts = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, "EnterpriseApps_" + (TAB_LABELS[currentTab]||currentTab) + "_" + ts + ".xlsx");
+}
+
+// ── Exporta todas as abas — 1 arquivo com 1 sheet por aba + sheet Resumo
+function exportAllExcel() {
+  if (typeof XLSX === "undefined") { alert("SheetJS nao carregado. Verifique sua conexao."); return; }
+  var wb = XLSX.utils.book_new();
+  TAB_ORDER.forEach(function(tab) {
+    var dataset = DATASETS[tab] || [];
+    var rows = buildExcelRows(dataset);
+    var ws = rows.length > 0
+      ? XLSX.utils.json_to_sheet(rows)
+      : XLSX.utils.json_to_sheet([{"Info":"Nenhum dado nesta aba"}]);
+    ws["!cols"] = COL_WIDTHS;
+    XLSX.utils.book_append_sheet(wb, ws, TAB_LABELS[tab] || tab);
+  });
+  var summary = [
+    ["Relatorio Completo: Enterprise Applications Monitor"],
+    ["Tenant ID", "` + session.tenantId + `"],
+    ["Gerado em", new Date().toLocaleString("pt-BR")],
+    []
+  ];
+  summary.push(["Aba", "Quantidade"]);
+  TAB_ORDER.forEach(function(tab) {
+    summary.push([TAB_LABELS_FULL[tab]||tab, (DATASETS[tab]||[]).length]);
+  });
+  var wsSummary = XLSX.utils.aoa_to_sheet(summary);
+  wsSummary["!cols"] = [{wch:30},{wch:15}];
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Resumo");
+  var ts = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, "EnterpriseApps_COMPLETO_" + ts + ".xlsx");
+}
+`;
+
   return '<!DOCTYPE html><html lang="pt-BR"><head>' +
-'<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>App Monitor</title>' +
-// SheetJS via CDN para export Excel no browser
+'<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ENTERPRISE APPLICATIONS MONITOR</title>' +
 '<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>' +
 '<style>' +
 '@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap");' +
@@ -698,9 +808,10 @@ function buildDashboard(session, sessionId) {
 '.card{background:#0d1520;border:1px solid #1a2840;border-radius:12px;padding:16px;margin-bottom:12px}' +
 '.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px}' +
 '.card-title{font-family:"JetBrains Mono",monospace;font-size:11px;color:#3a5068;text-transform:uppercase;letter-spacing:2px}' +
-// Botao de export Excel
 '.btn-excel{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:#166534;border:1px solid #22c55e40;border-radius:6px;color:#4ade80;font-size:10px;font-family:"JetBrains Mono",monospace;cursor:pointer;transition:all .2s;text-transform:uppercase;letter-spacing:1px;white-space:nowrap}' +
 '.btn-excel:hover{background:#15803d;border-color:#22c55e}' +
+'.btn-excel-all{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:#0f4c81;border:1px solid #3b82f640;border-radius:6px;color:#60a5fa;font-size:10px;font-family:"JetBrains Mono",monospace;cursor:pointer;transition:all .2s;text-transform:uppercase;letter-spacing:1px;white-space:nowrap}' +
+'.btn-excel-all:hover{background:#1e5fa3;border-color:#3b82f6}' +
 '.search-bar{width:100%;background:#060a0f;border:1px solid #1a2840;border-radius:7px;padding:8px 12px;color:#c8d8e8;font-size:12px;margin-bottom:10px;outline:none;font-family:"JetBrains Mono",monospace;transition:border-color .2s}' +
 '.search-bar:focus{border-color:#0ea5e9}' +
 '.tab-panel{display:none}.tab-panel.active{display:block}' +
@@ -785,7 +896,10 @@ function buildDashboard(session, sessionId) {
   '<div class="card-title" id="tabLabel">Todas as Aplicacoes (' + allApps.length + ')</div>' +
   '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
     '<div class="leg" style="margin:0"><span style="color:#ef4444">■ Critico</span><span style="color:#f59e0b">■ Alto</span><span style="color:#4ade80">■ Normal</span><span>W=Write</span></div>' +
-    '<button class="btn-excel" onclick="exportExcel()">&#8595; Excel</button>' +
+    // Botao aba atual — verde
+    '<button class="btn-excel" onclick="exportExcel()" title="Exportar somente esta aba como Excel">&#8595; Aba atual</button>' +
+    // Botao exportar tudo — azul
+    '<button class="btn-excel-all" onclick="exportAllExcel()" title="Exportar todas as 12 abas em um unico arquivo Excel">&#8595; Exportar tudo</button>' +
   '</div>' +
 '</div>' +
 '<input class="search-bar" id="search" type="text" placeholder="Buscar por nome, owner, criador, permissao, workload..." oninput="filterTable()">' +
@@ -807,16 +921,15 @@ function buildDashboard(session, sessionId) {
 '<div><div class="side-card"><div class="side-title"><span>Mudancas (24h)</span><span style="color:#2a4060">' + changes24h.length + '</span></div><div id="changesPanel">' + changesHtml + '</div></div>' +
 '<div class="side-card"><div class="side-title"><span>Secrets Expirando</span><span style="color:#2a4060">' + allSecretIssues.length + '</span></div><div id="secretAlertsPanel">' + secretAlertsHtml + '</div></div></div>' +
 '</div></div>' +
-
 '<div class="foot"><a href="/">Nova analise</a></div>' +
 
 '<script>' +
 'var SID="' + sessionId + '";var INTERVAL=5*60*1000;var next=Date.now()+INTERVAL;var busy=false;var currentTab="all";' +
 'var initChanges=' + initChangesJson + ';' +
 'if(initChanges&&initChanges.length>0){setTimeout(function(){initChanges.forEach(showToast);},700);}' +
-
-// Datasets para export — todos os grupos pre-calculados no servidor
 'var DATASETS=' + datasetsJson + ';' +
+
+exportFnJs +
 
 'setInterval(function(){if(busy)return;var r=Math.max(0,next-Date.now());var m=Math.floor(r/60000),s=Math.floor((r%60000)/1000);document.getElementById("timer").textContent=m+":"+(s<10?"0":"")+s;if(r<=0)doRefresh();},1000);' +
 'function forceRefresh(){next=Date.now();}' +
@@ -851,93 +964,6 @@ function buildDashboard(session, sessionId) {
 'function upd(id,v){var el=document.getElementById(id);if(el&&el.textContent!=String(v)){el.textContent=v;el.classList.remove("changed");void el.offsetWidth;el.classList.add("changed");}}' +
 'function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/\'/g,"&#39;");}' +
 
-// ── exportExcel: gera .xlsx da aba atual no browser ──────────────────────────
-'function exportExcel(){' +
-'  if(typeof XLSX==="undefined"){alert("SheetJS nao carregado. Verifique sua conexao.");return;}' +
-'  var dataset=DATASETS[currentTab]||[];' +
-'  if(dataset.length===0){alert("Nenhum dado para exportar nesta aba.");return;}' +
-'  var labels={all:"Todas",risky:"App_Permissions",write:"Write",writegroups:"Write_Groups",writeusers:"Write_Users",writeemail:"Write_Email",writefiles:"Write_Files",critical:"Critical",recent:"Criados_30d",noowner:"Sem_Owner",secrets:"Com_Secrets",expsecrets:"Exp_Secrets"};' +
-// Monta linhas da planilha
-'  var rows=dataset.map(function(a){' +
-'    var owners=(a._owners||[]).map(function(o){return o.displayName||o.userPrincipalName||o.mail||"";}).join("; ");' +
-'    var appPerms=(a.appRoles||[]).map(function(p){return p.name||p.id;}).join("; ");' +
-'    var delPerms=(a.delegated||[]).map(function(p){return p.name||p.id;}).join("; ");' +
-'    var writePerms=(a._writePermissions||[]).map(function(p){return p.name||p.id;}).join("; ");' +
-'    var workloads=((a._usageAnalysis&&a._usageAnalysis.workloads)||[]).join("; ");' +
-'    var secrets=(a.secrets||[]).map(function(s){return s.displayName+"("+s.status+",exp:"+( s.endDate?new Date(s.endDate).toLocaleDateString("pt-BR"):"sem data")+")";}).join("; ");' +
-'    var lastSignIn=a._lastSignIn&&a._lastSignIn.length>0?new Date(a._lastSignIn[0].createdDateTime).toLocaleString("pt-BR"):"";' +
-'    var lastUser=a._lastSignIn&&a._lastSignIn.length>0?(a._lastSignIn[0].userDisplayName||a._lastSignIn[0].userPrincipalName||a._lastSignIn[0].servicePrincipalName||""):"";' +
-'    var createdBy=a._createdBy||"";' +
-'    return {' +
-'      "Nome": a.displayName||"",' +
-'      "App ID": a.appId||"",' +
-'      "Criado em": a.createdDateTime?new Date(a.createdDateTime).toLocaleString("pt-BR"):"",' +
-'      "Criado por": createdBy,' +
-'      "Owner(s)": owners,' +
-'      "Risco": a._riskLevel||"",' +
-'      "Ultimo Uso": lastSignIn,' +
-'      "Ultimo Usuario": lastUser,' +
-'      "Sign-in Audience": a.signInAudience||"",' +
-'      "App Permissions (APP)": appPerms,' +
-'      "Delegated Permissions (DEL)": delPerms,' +
-'      "Write Permissions": writePerms,' +
-'      "Write em Groups": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Group.")})?("Sim"):"Nao",' +
-'      "Write em Users": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("User.")})?("Sim"):"Nao",' +
-'      "Write em E-mail": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Mail.")||(p.name||"").startsWith("MailboxSettings.")})?("Sim"):"Nao",' +
-'      "Write em Files": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Files.")||(p.name||"").startsWith("Sites.")})?("Sim"):"Nao",' +
-'      "Workloads": workloads,' +
-'      "Secrets": secrets,' +
-'      "Notas": a.notes||""' +
-'    };' +
-'  });' +
-
-// Cria workbook com duas abas: dados + resumo
-'  var wb=XLSX.utils.book_new();' +
-
-// Aba principal com os dados
-'  var ws=XLSX.utils.json_to_sheet(rows);' +
-
-// Larguras de coluna
-'  ws["!cols"]=[' +
-'    {wch:40},{wch:38},{wch:20},{wch:25},{wch:30},{wch:10},' +
-'    {wch:20},{wch:25},{wch:18},{wch:60},{wch:60},{wch:50},' +
-'    {wch:15},{wch:14},{wch:15},{wch:14},{wch:50},{wch:60},{wch:30}' +
-'  ];' +
-
-'  XLSX.utils.book_append_sheet(wb,ws,"Apps");' +
-
-// Aba de resumo
-'  var summary=[' +
-'    ["Relatorio: Enterprise Applications Monitor"],' +
-'    ["Tenant ID","' + session.tenantId + '"],' +
-'    ["Gerado em",new Date().toLocaleString("pt-BR")],' +
-'    ["Aba exportada",labels[currentTab]||currentTab],' +
-'    ["Total de apps",dataset.length],' +
-'    [],' +
-'    ["Categoria","Quantidade"],' +
-'    ["Total de apps",' + allApps.length + '],' +
-'    ["Com App Permission",' + riskyApps.length + '],' +
-'    ["Com Write Permission",' + writeApps.length + '],' +
-'    ["Write em Groups",' + writeGroupsApps.length + '],' +
-'    ["Write em Users",' + writeUsersApps.length + '],' +
-'    ["Write em E-mail",' + writeEmailApps.length + '],' +
-'    ["Write em Files",' + writeFilesApps.length + '],' +
-'    ["Risco Critical",' + criticalApps.length + '],' +
-'    ["Criados nos ultimos 30 dias",' + recentApps.length + '],' +
-'    ["Sem Owner",' + noOwnerApps.length + '],' +
-'    ["Com Secrets",' + appsWithSecrets.length + '],' +
-'    ["Secrets Expirando/Expiradas",' + expSecrets.length + '],' +
-'  ];' +
-'  var wsSummary=XLSX.utils.aoa_to_sheet(summary);' +
-'  wsSummary["!cols"]=[{wch:35},{wch:45}];' +
-'  XLSX.utils.book_append_sheet(wb,wsSummary,"Resumo");' +
-
-// Baixa o arquivo
-'  var tabName=labels[currentTab]||currentTab;' +
-'  var ts=new Date().toISOString().slice(0,10);' +
-'  XLSX.writeFile(wb,"EnterpriseApps_"+tabName+"_"+ts+".xlsx");' +
-'}' +
-
 'function doRefresh(){' +
 '  if(busy)return;busy=true;next=Date.now()+INTERVAL;' +
 '  var ri=document.getElementById("ri");ri.classList.add("refresh-spin");' +
@@ -945,7 +971,6 @@ function buildDashboard(session, sessionId) {
 '  fetch("/refresh/"+SID).then(function(r){return r.json();}).then(function(data){' +
 '    if(data.error){showToast({severity:"critico",message:"Erro: "+data.error});return;}' +
 '    var apps=data.apps;' +
-// Atualiza datasets em memoria para o proximo export refletir os dados novos
 '    DATASETS.all=apps;' +
 '    DATASETS.risky=apps.filter(function(a){return a.appRoles&&a.appRoles.length>0;});' +
 '    DATASETS.write=apps.filter(function(a){return a._writePermissions&&a._writePermissions.length>0;});' +
