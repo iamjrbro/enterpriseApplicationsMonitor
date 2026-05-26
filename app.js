@@ -67,7 +67,7 @@ async function getApps(token) {
 
 async function getAppOwners(appObjectId, token) {
   try {
-    var res = await graphGet("/applications/" + appObjectId + "/owners?$select=displayName,userPrincipalName,mail", token);
+    var res = await graphGet("/applications/" + appObjectId + "/owners?$select=displayName,userPrincipalName,mail,id,jobTitle,department,officeLocation,mobilePhone,businessPhones", token);
     return res.value || [];
   } catch (e) { return []; }
 }
@@ -608,6 +608,50 @@ function buildDashboard(session, sessionId) {
     var writeCatLabels = { groups:"Grupos", users:"Usuarios", email:"E-mail", files:"Arquivos/SharePoint", directory:"Diretorio", apps:"Aplicacoes" };
     var usoHtml = '<div class="audit-wrap"><div class="audit-title">Onde este app e provavelmente usado:</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + (usage.workloads.length > 0 ? usage.workloads.map(function(w) { return '<span class="wb">' + escapeHtml(w) + '</span>'; }).join("") : '<span style="color:#3a5068">Nenhum workload identificado</span>') + '</div><div class="audit-title">Categorias com permissao de escrita:</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + (writeCategories.length > 0 ? writeCategories.map(function(c) { return '<span class="wc-badge">' + (writeCatLabels[c] || c) + '</span>'; }).join("") : '<span style="color:#4ade80;font-size:12px">Nenhuma escrita detectada</span>') + '</div><div class="audit-title">Permissoes de escrita detalhadas:</div>' + (writePerms.length > 0 ? writePerms.map(function(p) { var risk = classifyPerm(p.name); return '<div class="audit-item"><span class="audit-action" style="color:' + riskColor[risk] + ';font-weight:600">&#9999; ' + escapeHtml(permLabel(p)) + '</span><span style="color:#3a5068;font-size:10px">' + escapeHtml(p.resource || "") + '</span></div>'; }).join("") : '<div class="audit-item"><span style="color:#4ade80">Nenhuma permissao de escrita</span></div>') + (sp ? '<div class="audit-title" style="margin-top:12px">Service Principal:</div><div class="audit-item"><span class="audit-action">Tipo</span><span style="color:#94a3b8">' + escapeHtml(sp.servicePrincipalType || "N/A") + '</span></div><div class="audit-item"><span class="audit-action">Publisher</span><span style="color:#94a3b8">' + escapeHtml(sp.publisherName || "N/A") + '</span></div>' + (sp.homepage ? '<div class="audit-item"><span class="audit-action">Homepage</span><span style="color:#60a5fa;font-size:10px">' + escapeHtml(sp.homepage) + '</span></div>' : '') + (sp.replyUrls && sp.replyUrls.length > 0 ? '<div class="audit-item"><span class="audit-action">Reply URLs</span><div style="display:flex;flex-direction:column;gap:2px">' + sp.replyUrls.map(function(u) { return '<span style="color:#60a5fa;font-size:10px;font-family:monospace">' + escapeHtml(u) + '</span>'; }).join("") + '</div></div>' : '') : '') + '</div>';
 
+    // ── Owners — detalhado ────────────────────────────────────────────────
+    var ownerList = a._owners || [];
+    var ownerHtml = "";
+    if (ownerList.length === 0) {
+      ownerHtml = '<div class="audit-wrap">' +
+        '<div class="audit-item" style="border-left:2px solid #ef4444;padding-left:10px">' +
+          '<span class="audit-action" style="color:#ef4444;font-weight:600">Nenhum owner cadastrado</span>' +
+        '</div>' +
+        '<div style="font-size:11px;color:#3a5068;padding:8px;line-height:1.6;background:#0a1525;border-radius:4px;margin-top:4px">' +
+          'Apps sem owner sao um risco de seguranca: ninguem e responsavel por revisar permissoes, ' +
+          'renovar secrets ou responder por mudancas. Recomenda-se adicionar ao menos um owner responsavel.' +
+        '</div>' +
+      '</div>';
+    } else {
+      ownerHtml = '<div class="audit-wrap">' +
+        '<div class="audit-title">' + ownerList.length + ' owner(s) cadastrado(s):</div>' +
+        ownerList.map(function(o, idx) {
+          var name = o.displayName || o.userPrincipalName || o.mail || "Owner desconhecido";
+          var email = o.mail || o.userPrincipalName || "";
+          var initials = name.split(" ").map(function(w){return w[0]||"";}).slice(0,2).join("").toUpperCase();
+          var colors = ["#0ea5e9","#38bdf8","#a78bfa","#4ade80","#f59e0b","#60a5fa"];
+          var color = colors[idx % colors.length];
+          return '<div class="owner-card">' +
+            '<div class="owner-avatar" style="background:' + color + '20;border:1px solid ' + color + '40;color:' + color + '">' + escapeHtml(initials || "?") + '</div>' +
+            '<div class="owner-info">' +
+              '<div class="owner-name">' + escapeHtml(name) + '</div>' +
+              (email ? '<div class="owner-detail"><span class="owner-label">E-mail</span><a href="mailto:' + escapeHtml(email) + '" style="color:#60a5fa;font-size:10px;text-decoration:none">' + escapeHtml(email) + '</a></div>' : '') +
+              (o.jobTitle ? '<div class="owner-detail"><span class="owner-label">Cargo</span><span class="owner-value">' + escapeHtml(o.jobTitle) + '</span></div>' : '') +
+              (o.department ? '<div class="owner-detail"><span class="owner-label">Departamento</span><span class="owner-value">' + escapeHtml(o.department) + '</span></div>' : '') +
+              (o.officeLocation ? '<div class="owner-detail"><span class="owner-label">Localidade</span><span class="owner-value">' + escapeHtml(o.officeLocation) + '</span></div>' : '') +
+              ((o.mobilePhone || (o.businessPhones && o.businessPhones.length > 0)) ? '<div class="owner-detail"><span class="owner-label">Telefone</span><span class="owner-value">' + escapeHtml(o.mobilePhone || o.businessPhones[0] || "") + '</span></div>' : '') +
+              (o.id ? '<div class="owner-detail"><span class="owner-label">Object ID</span><span style="color:#3a5068;font-size:9px;font-family:monospace">' + escapeHtml(o.id) + '</span></div>' : '') +
+            '</div>' +
+          '</div>';
+        }).join("") +
+        '<div class="audit-title" style="margin-top:10px">Boas praticas:</div>' +
+        '<div class="audit-item">' +
+          '<span style="color:' + (ownerList.length >= 2 ? "#4ade80" : "#f59e0b") + ';font-size:10px">' +
+            (ownerList.length >= 2 ? "✓ Multiplos owners — boa redundancia" : "⚠ Apenas 1 owner — recomenda-se adicionar um segundo") +
+          '</span>' +
+        '</div>' +
+      '</div>';
+    }
+
     // ── Redirect URIs / URLs do app registration ──────────────────────────
     var urlTypeLabel = { web: "Web", spa: "SPA (Single Page App)", publicClient: "Mobile / Desktop" };
     var urlSections = [];
@@ -660,6 +704,7 @@ function buildDashboard(session, sessionId) {
           '<div class="etab" onclick="etab(this,\'esg-' + uid + '\')">Sugestoes' + (sugg.add.length + sugg.remove.length > 0 ? ' <span class="sugg-count">' + (sugg.add.length + sugg.remove.length) + '</span>' : '') + '</div>' +
           '<div class="etab" onclick="etab(this,\'esr-' + uid + '\')">Secrets</div>' +
           '<div class="etab" onclick="etab(this,\'eat-' + uid + '\')">Atividade</div>' +
+          '<div class="etab" onclick="etab(this,\'eow-' + uid + '\')" style="' + (ownerList.length === 0 ? 'color:#ef4444;border-color:#ef444440' : '') + '">Owner (' + ownerList.length + ')</div>' +
           '<div class="etab" onclick="etab(this,\'els-' + uid + '\')">Ultimo Uso</div>' +
           '<div class="etab" onclick="etab(this,\'eus-' + uid + '\')">Onde e Usado</div>' +
           '<div class="etab" onclick="etab(this,\'eur-' + uid + '\')" style="color:#60a5fa;border-color:#3b82f640">URLs (' + redirectUris.length + ')</div>' +
@@ -669,6 +714,7 @@ function buildDashboard(session, sessionId) {
         '<div id="esg-' + uid + '" class="epanel" style="display:none"><div class="sugg-wrap">' + suggHtml + '</div></div>' +
         '<div id="esr-' + uid + '" class="epanel" style="display:none">' + secretsHtml + '</div>' +
         '<div id="eat-' + uid + '" class="epanel" style="display:none">' + auditHtml + '</div>' +
+        '<div id="eow-' + uid + '" class="epanel" style="display:none">' + ownerHtml + '</div>' +
         '<div id="els-' + uid + '" class="epanel" style="display:none">' + lastUsoHtml + '</div>' +
         '<div id="eus-' + uid + '" class="epanel" style="display:none">' + usoHtml + '</div>' +
         '<div id="eur-' + uid + '" class="epanel" style="display:none">' + urlsHtml + '</div>' +
@@ -886,6 +932,13 @@ function exportAllExcel() {
 '.secret-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:8px;background:#60a5fa20;color:#60a5fa;border:1px solid #60a5fa40;font-family:"JetBrains Mono",monospace}' +
 '.notes-badge{font-size:8px;padding:1px 4px;border-radius:8px;background:#4ade8020;color:#4ade80;border:1px solid #4ade8040}' +
 '.url-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:8px;background:#3b82f620;color:#60a5fa;border:1px solid #3b82f640;font-family:"JetBrains Mono",monospace;cursor:help}' +
+'.owner-card{display:flex;gap:12px;padding:10px;background:#0a1525;border-radius:8px;margin-bottom:8px;align-items:flex-start}' +
+'.owner-avatar{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;font-weight:700;font-size:13px;flex-shrink:0;font-family:"JetBrains Mono",monospace}' +
+'.owner-info{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}' +
+'.owner-name{font-size:12px;font-weight:600;color:#c8d8e8}' +
+'.owner-detail{display:flex;align-items:center;gap:8px;flex-wrap:wrap}' +
+'.owner-label{font-size:9px;color:#3a5068;font-family:"JetBrains Mono",monospace;text-transform:uppercase;letter-spacing:.5px;min-width:70px;flex-shrink:0}' +
+'.owner-value{font-size:10px;color:#94a3b8}' +
 '.rl-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:8px;border:1px solid;font-family:"JetBrains Mono",monospace;white-space:nowrap}' +
 '.expand-cell{background:#060d16;padding:12px 14px;border-bottom:1px solid #1a2840}' +
 '.notes-box{background:#0a1f10;border:1px solid #166534;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#86efac;line-height:1.5}' +
