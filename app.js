@@ -60,7 +60,7 @@ async function graphPaged(url, token, limit) {
 
 async function getApps(token) {
   return graphPaged(
-    "/applications?$select=displayName,appId,id,requiredResourceAccess,createdDateTime,signInAudience,notes,tags,passwordCredentials&$top=999",
+    "/applications?$select=displayName,appId,id,requiredResourceAccess,createdDateTime,signInAudience,notes,tags,passwordCredentials,web,spa,publicClient&$top=999",
     token, 10000
   );
 }
@@ -371,6 +371,22 @@ function permLabel(p) { return p.name || "[" + p.id.substring(0, 8) + "...]"; }
 function fmtDate(d) { if (!d) return ""; return new Date(d).toLocaleString("pt-BR"); }
 function fmtDateOnly(d) { if (!d) return ""; return new Date(d).toLocaleDateString("pt-BR"); }
 
+function getRedirectUris(a) {
+  var uris = [];
+  if (a.web && a.web.redirectUris) uris = uris.concat(a.web.redirectUris);
+  if (a.spa && a.spa.redirectUris) uris = uris.concat(a.spa.redirectUris);
+  if (a.publicClient && a.publicClient.redirectUris) uris = uris.concat(a.publicClient.redirectUris);
+  return uris;
+}
+
+function getRedirectUriTypes(a) {
+  var types = [];
+  if (a.web && a.web.redirectUris && a.web.redirectUris.length > 0) types.push("Web");
+  if (a.spa && a.spa.redirectUris && a.spa.redirectUris.length > 0) types.push("SPA");
+  if (a.publicClient && a.publicClient.redirectUris && a.publicClient.redirectUris.length > 0) types.push("Mobile/Desktop");
+  return types;
+}
+
 function fmtLastUsed(signIns) {
   if (!signIns || signIns.length === 0) return { text: "Nunca", color: "#3a5068", full: "Nenhum sign-in detectado" };
   var last = signIns[0];
@@ -538,6 +554,8 @@ function buildDashboard(session, sessionId) {
     var lastUsed = fmtLastUsed(a._lastSignIn);
     var lastUsedCell = '<span style="color:' + lastUsed.color + ';font-family:\'JetBrains Mono\',monospace;font-size:11px" title="' + escapeHtml(lastUsed.full) + '">' + lastUsed.text + '</span>';
     var riskBadgeColor = a._riskLevel === "Critical" ? "#ef4444" : a._riskLevel === "High" ? "#f59e0b" : a._riskLevel === "Medium" ? "#a78bfa" : "#4ade80";
+    var redirectUris = getRedirectUris(a);
+    var redirectUriTypes = getRedirectUriTypes(a);
     var notesHtml = a.notes ? '<div class="notes-box"><span class="notes-label">Notas:</span> ' + escapeHtml(a.notes) + '</div>' : "";
 
     var permsHtml = allPerms.length === 0 ? '<span style="color:#3a5068;font-size:11px">Nenhuma permissao registrada</span>'
@@ -590,11 +608,45 @@ function buildDashboard(session, sessionId) {
     var writeCatLabels = { groups:"Grupos", users:"Usuarios", email:"E-mail", files:"Arquivos/SharePoint", directory:"Diretorio", apps:"Aplicacoes" };
     var usoHtml = '<div class="audit-wrap"><div class="audit-title">Onde este app e provavelmente usado:</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + (usage.workloads.length > 0 ? usage.workloads.map(function(w) { return '<span class="wb">' + escapeHtml(w) + '</span>'; }).join("") : '<span style="color:#3a5068">Nenhum workload identificado</span>') + '</div><div class="audit-title">Categorias com permissao de escrita:</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">' + (writeCategories.length > 0 ? writeCategories.map(function(c) { return '<span class="wc-badge">' + (writeCatLabels[c] || c) + '</span>'; }).join("") : '<span style="color:#4ade80;font-size:12px">Nenhuma escrita detectada</span>') + '</div><div class="audit-title">Permissoes de escrita detalhadas:</div>' + (writePerms.length > 0 ? writePerms.map(function(p) { var risk = classifyPerm(p.name); return '<div class="audit-item"><span class="audit-action" style="color:' + riskColor[risk] + ';font-weight:600">&#9999; ' + escapeHtml(permLabel(p)) + '</span><span style="color:#3a5068;font-size:10px">' + escapeHtml(p.resource || "") + '</span></div>'; }).join("") : '<div class="audit-item"><span style="color:#4ade80">Nenhuma permissao de escrita</span></div>') + (sp ? '<div class="audit-title" style="margin-top:12px">Service Principal:</div><div class="audit-item"><span class="audit-action">Tipo</span><span style="color:#94a3b8">' + escapeHtml(sp.servicePrincipalType || "N/A") + '</span></div><div class="audit-item"><span class="audit-action">Publisher</span><span style="color:#94a3b8">' + escapeHtml(sp.publisherName || "N/A") + '</span></div>' + (sp.homepage ? '<div class="audit-item"><span class="audit-action">Homepage</span><span style="color:#60a5fa;font-size:10px">' + escapeHtml(sp.homepage) + '</span></div>' : '') + (sp.replyUrls && sp.replyUrls.length > 0 ? '<div class="audit-item"><span class="audit-action">Reply URLs</span><div style="display:flex;flex-direction:column;gap:2px">' + sp.replyUrls.map(function(u) { return '<span style="color:#60a5fa;font-size:10px;font-family:monospace">' + escapeHtml(u) + '</span>'; }).join("") + '</div></div>' : '') : '') + '</div>';
 
+    // ── Redirect URIs / URLs do app registration ──────────────────────────
+    var urlTypeLabel = { web: "Web", spa: "SPA (Single Page App)", publicClient: "Mobile / Desktop" };
+    var urlSections = [];
+    if (a.web && a.web.redirectUris && a.web.redirectUris.length > 0) {
+      urlSections.push({ type: "Web", uris: a.web.redirectUris, logoutUrl: a.web.logoutUrl || null });
+    }
+    if (a.spa && a.spa.redirectUris && a.spa.redirectUris.length > 0) {
+      urlSections.push({ type: "SPA (Single Page App)", uris: a.spa.redirectUris, logoutUrl: null });
+    }
+    if (a.publicClient && a.publicClient.redirectUris && a.publicClient.redirectUris.length > 0) {
+      urlSections.push({ type: "Mobile / Desktop", uris: a.publicClient.redirectUris, logoutUrl: null });
+    }
+
+    var urlsHtml = urlSections.length === 0
+      ? '<div class="audit-wrap"><div class="audit-item"><span class="audit-action">Nenhuma Redirect URI cadastrada</span><span style="color:#3a5068;font-size:10px">App nao usa fluxo redirect (pode ser client_credentials / daemon)</span></div></div>'
+      : '<div class="audit-wrap">' +
+        urlSections.map(function(sec) {
+          return '<div class="audit-title">' + escapeHtml(sec.type) + ':</div>' +
+            sec.uris.map(function(uri) {
+              var isLocalhost = uri.includes("localhost") || uri.includes("127.0.0.1");
+              var isHttp = uri.startsWith("http://") && !isLocalhost;
+              var uriColor = isHttp ? "#f59e0b" : "#60a5fa";
+              var warn = isHttp ? ' <span style="color:#f59e0b;font-size:9px">[HTTP - inseguro]</span>' : '';
+              return '<div class="audit-item"><span style="color:' + uriColor + ';font-size:10px;font-family:monospace;word-break:break-all">' + escapeHtml(uri) + '</span>' + warn + '</div>';
+            }).join("") +
+            (sec.logoutUrl ? '<div class="audit-item"><span class="audit-action">Logout URL</span><span style="color:#94a3b8;font-size:10px;font-family:monospace">' + escapeHtml(sec.logoutUrl) + '</span></div>' : '');
+        }).join("") +
+        '<div class="audit-title" style="margin-top:8px">Resumo:</div>' +
+        '<div class="audit-item"><span class="audit-action">Total de URLs</span><span style="color:#c8d8e8">' + redirectUris.length + '</span></div>' +
+        (redirectUriTypes.length > 0 ? '<div class="audit-item"><span class="audit-action">Tipos</span><span style="color:#94a3b8">' + redirectUriTypes.join(", ") + '</span></div>' : '') +
+        '</div>';
+
     var riskLevelColor = a._riskLevel === "Critical" ? "#ef4444" : a._riskLevel === "High" ? "#f59e0b" : a._riskLevel === "Medium" ? "#a78bfa" : "#4ade80";
     var riscoHtml = '<div class="audit-wrap"><div class="audit-item"><span class="audit-action" style="color:#c8d8e8;font-weight:600">Classificacao</span><span style="color:' + riskLevelColor + ';font-family:\'JetBrains Mono\',monospace;font-weight:700;font-size:14px">' + a._riskLevel + '</span></div><div class="audit-item"><span class="audit-action">Permissoes de escrita</span><span style="color:' + (writePerms.length > 0 ? "#f59e0b" : "#4ade80") + '">' + writePerms.length + ' permissao(oes)</span></div><div class="audit-item"><span class="audit-action">Owner</span><span style="color:' + (owners.length === 0 ? "#ef4444" : "#4ade80") + '">' + (owners.length === 0 ? "Sem owner (+20pts risco)" : owners.length + " owner(s)") + '</span></div><div class="audit-item"><span class="audit-action">Ultimo uso</span><span style="color:' + lastUsed.color + '">' + lastUsed.text + (lastUsed.full !== "Nenhum sign-in detectado" ? " — " + lastUsed.full : "") + '</span></div>' + (writePerms.length > 0 ? '<div class="audit-title" style="margin-top:10px">Permissoes criticas:</div>' + writePerms.map(function(p) { var risk = classifyPerm(p.name); return '<div class="audit-item"><span style="color:' + riskColor[risk] + ';font-weight:600">' + escapeHtml(permLabel(p)) + '</span><span style="color:#3a5068;font-size:10px">' + escapeHtml(getPermTooltip(p.name, p.description, risk).substring(0, 70)) + '...</span></div>'; }).join("") : '<div class="audit-item"><span style="color:#4ade80">Nenhuma permissao critica</span></div>') + '</div>';
 
     return '<tr class="ar' + (isRisky ? " risky" : "") + '" onclick="toggle(\'rx-' + uid + '\')">' +
-      '<td><div class="app-name">' + escapeHtml(a.displayName || "—") + (isRisky ? '<span class="risk-badge">App Perm</span>' : '') + (writePerms.length > 0 ? '<span class="write-badge">W</span>' : '') + (writeCategories.includes("groups") ? '<span class="wcat-badge">Groups</span>' : '') + (writeCategories.includes("users") ? '<span class="wcat-badge">Users</span>' : '') + (writeCategories.includes("email") ? '<span class="wcat-badge">Mail</span>' : '') + (writeCategories.includes("files") ? '<span class="wcat-badge">Files</span>' : '') + ((a.secrets && a.secrets.length > 0) ? '<span class="secret-badge">' + a.secrets.length + 's</span>' : '') + (a.notes ? '<span class="notes-badge">n</span>' : '') + '<span class="rl-badge" style="border-color:' + riskBadgeColor + ';color:' + riskBadgeColor + '">' + a._riskLevel + '</span></div></td>' +
+      '<td><div class="app-name">' + escapeHtml(a.displayName || "—") + (isRisky ? '<span class="risk-badge">App Perm</span>' : '') + (writePerms.length > 0 ? '<span class="write-badge">W</span>' : '') + (writeCategories.includes("groups") ? '<span class="wcat-badge">Groups</span>' : '') + (writeCategories.includes("users") ? '<span class="wcat-badge">Users</span>' : '') + (writeCategories.includes("email") ? '<span class="wcat-badge">Mail</span>' : '') + (writeCategories.includes("files") ? '<span class="wcat-badge">Files</span>' : '') + ((a.secrets && a.secrets.length > 0) ? '<span class="secret-badge">' + a.secrets.length + 's</span>' : '') + (a.notes ? '<span class="notes-badge">n</span>' : '') +
+        (redirectUris.length > 0 ? '<span class="url-badge" title="' + escapeHtml(redirectUris.join(', ')) + '">' + redirectUris.length + ' URL' + (redirectUris.length > 1 ? 's' : '') + '</span>' : '') +
+        '<span class="rl-badge" style="border-color:' + riskBadgeColor + ';color:' + riskBadgeColor + '">' + a._riskLevel + '</span></div></td>' +
       '<td>' + fmtDate(a.createdDateTime) + '</td>' +
       '<td>' + lastUsedCell + '</td>' +
       '<td>' + createdBy + '</td>' +
@@ -610,6 +662,7 @@ function buildDashboard(session, sessionId) {
           '<div class="etab" onclick="etab(this,\'eat-' + uid + '\')">Atividade</div>' +
           '<div class="etab" onclick="etab(this,\'els-' + uid + '\')">Ultimo Uso</div>' +
           '<div class="etab" onclick="etab(this,\'eus-' + uid + '\')">Onde e Usado</div>' +
+          '<div class="etab" onclick="etab(this,\'eur-' + uid + '\')" style="color:#60a5fa;border-color:#3b82f640">URLs (' + redirectUris.length + ')</div>' +
           '<div class="etab" onclick="etab(this,\'erk-' + uid + '\')" style="color:' + riskBadgeColor + ';border-color:' + riskBadgeColor + '40">Risco (' + a._riskLevel + ')</div>' +
         '</div>' +
         '<div id="epp-' + uid + '" class="epanel active"><div class="perm-wrap">' + permsHtml + '</div></div>' +
@@ -618,6 +671,7 @@ function buildDashboard(session, sessionId) {
         '<div id="eat-' + uid + '" class="epanel" style="display:none">' + auditHtml + '</div>' +
         '<div id="els-' + uid + '" class="epanel" style="display:none">' + lastUsoHtml + '</div>' +
         '<div id="eus-' + uid + '" class="epanel" style="display:none">' + usoHtml + '</div>' +
+        '<div id="eur-' + uid + '" class="epanel" style="display:none">' + urlsHtml + '</div>' +
         '<div id="erk-' + uid + '" class="epanel" style="display:none">' + riscoHtml + '</div>' +
       '</td></tr>';
   }
@@ -689,6 +743,10 @@ function buildExcelRows(dataset) {
       "Write em Files": (a._writePermissions||[]).some(function(p){return(p.name||"").startsWith("Files.")||(p.name||"").startsWith("Sites.")}) ? "Sim" : "Nao",
       "Workloads": workloads,
       "Secrets": secrets,
+      "Redirect URIs (Web)": (a.web&&a.web.redirectUris||[]).join("; "),
+      "Redirect URIs (SPA)": (a.spa&&a.spa.redirectUris||[]).join("; "),
+      "Redirect URIs (Mobile)": (a.publicClient&&a.publicClient.redirectUris||[]).join("; "),
+      "Logout URL": (a.web&&a.web.logoutUrl)||"",
       "Notas": a.notes||""
     };
   });
@@ -696,7 +754,8 @@ function buildExcelRows(dataset) {
 var COL_WIDTHS = [
   {wch:40},{wch:38},{wch:20},{wch:25},{wch:30},{wch:10},
   {wch:20},{wch:25},{wch:18},{wch:60},{wch:60},{wch:50},
-  {wch:15},{wch:14},{wch:15},{wch:14},{wch:50},{wch:60},{wch:30}
+  {wch:15},{wch:14},{wch:15},{wch:14},{wch:50},{wch:60},{wch:30},
+  {wch:60},{wch:60},{wch:60},{wch:40}
 ];
 var TAB_LABELS = {
   all:"Todas", risky:"App_Permissions", write:"Write",
@@ -783,7 +842,7 @@ function exportAllExcel() {
 `;
 
   return '<!DOCTYPE html><html lang="pt-BR"><head>' +
-'<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ENTERPRISE APPLICATIONS MONITOR</title>' +
+'<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>App Monitor</title>' +
 '<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>' +
 '<style>' +
 '@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap");' +
@@ -826,6 +885,7 @@ function exportAllExcel() {
 '.wcat-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:8px;background:#f59e0b10;color:#f59e0b;border:1px solid #f59e0b30;font-family:"JetBrains Mono",monospace}' +
 '.secret-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:8px;background:#60a5fa20;color:#60a5fa;border:1px solid #60a5fa40;font-family:"JetBrains Mono",monospace}' +
 '.notes-badge{font-size:8px;padding:1px 4px;border-radius:8px;background:#4ade8020;color:#4ade80;border:1px solid #4ade8040}' +
+'.url-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:8px;background:#3b82f620;color:#60a5fa;border:1px solid #3b82f640;font-family:"JetBrains Mono",monospace;cursor:help}' +
 '.rl-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:8px;border:1px solid;font-family:"JetBrains Mono",monospace;white-space:nowrap}' +
 '.expand-cell{background:#060d16;padding:12px 14px;border-bottom:1px solid #1a2840}' +
 '.notes-box{background:#0a1f10;border:1px solid #166534;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#86efac;line-height:1.5}' +
