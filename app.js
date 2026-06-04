@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 
 const REDIRECT_URI = process.env.REDIRECT_URI ||
-  "https://enterprise-applications-monitor.onrender.com/callback";
+  "your_url_here/callback";
 
 const cca = new ConfidentialClientApplication({
   auth: {
