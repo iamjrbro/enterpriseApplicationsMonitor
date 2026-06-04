@@ -214,12 +214,25 @@ Todas as informações são processadas em tempo real e organizadas internamente
 Após a coleta, os dados são convertidos em um dashboard visual e interativo.
 O sistema organiza automaticamente:
 
+- Aplicações ativas
+- Aplicações desabilitadas
+- Aplicações excluídas
 - Aplicações críticas
+- Aplicações que possuam permissão de write, user.write, group.write, mail.write e files.write
 - Apps sem owner
-- Permissões perigosas
-- Secrets expiradas
+- Permissões perigosas (API Permissions)
 - Alterações recentes
 - Alertas de segurança
+- Aplicações que possuam SSO
+- Owners
+- Sugestões sobre API Permissions
+- URL redirect
+- Secrets expiradas
+- Certificados
+- Atividade
+- Local de uso
+- Último uso
+
 
 Tudo é exibido através de tabelas dinâmicas, abas inteligentes, indicadores visuais e alertas automáticos.
 
